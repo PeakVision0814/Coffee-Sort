@@ -1,0 +1,19 @@
+# Python 编译文件
+__pycache__/
+*.pyc
+
+# 虚拟环境 (防止误传)
+env/
+venv/
+.conda/
+
+# IDE 配置
+.vscode/
+.idea/
+
+# 项目日志 (不要传到云端，文件太大)
+logs/
+*.log
+
+# 敏感配置 (可选，如果以后有API Key不想公开)
+# config/secrets.py
