@@ -1,1 +1,10 @@
- 
+certifi==2026.1.4
+charset-normalizer==3.4.4
+idna==3.11
+numpy==2.2.6
+opencv-python==4.13.0.90
+packaging @ file:///C:/miniconda3/conda-bld/packaging_1761049101700/work
+pymycobot==4.0.3
+pyserial==3.5
+requests==2.32.5
+urllib3==2.6.3
