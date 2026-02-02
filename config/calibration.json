@@ -1,0 +1,9 @@
+{
+    "scale_mm_per_pixel": 0.2400159797677106,
+    "camera_gripper_offset": [
+        4.200000000000003,
+        40.5
+    ],
+    "calibrate_height": 199.4,
+    "camera_matrix_path": "config/camera_matrix.npz"
+}
