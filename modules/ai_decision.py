@@ -13,7 +13,7 @@ except ImportError:
 # --- 🔥 关键开关 ---
 # True = 不花钱，用假数据测试逻辑
 # False = 真正调用 DeepSeek API (需要配置 api_key)
-SIMULATION_MODE = True 
+SIMULATION_MODE = False 
 
 class AIDecisionMaker:
     def __init__(self):
@@ -159,8 +159,9 @@ class AIDecisionMaker:
 # --- 单元测试 ---
 if __name__ == "__main__":
     ai = AIDecisionMaker()
-
-    # 测试场景
-    print(ai.process_text("把这个放到3号"))  # 应该返回 slot_id: 3
-    print(ai.process_text("系统开始运行"))    # 应该返回 action: start
-    print(ai.process_text("你好"))           # 应该返回 command: None
+    
+    # 可以在这里测试一下
+    # 注意：如果 SIMULATION_MODE = False，这里会真的消耗 Token
+    print(">>> 测试发送指令: '把这个放到5号'")
+    res = ai.process_text("把这个放到5号")
+    print(f">>> 解析结果: {res}")
