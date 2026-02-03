@@ -1,0 +1,6 @@
+{
+    "api_key": "sk-your-key-here",
+    "base_url": "https://api.deepseek.com/v1",
+    "model_name": "deepseek-chat",
+    "system_prompt": "你是一个工业机器人助手。用户会用自然语言给你指令。\n你需要提取意图，并严格输出以下 JSON 格式，不要包含Markdown或其他文字：\n\n1. 放入指定槽位: {\"type\": \"sort\", \"slot_id\": 1~6}\n2. 启动系统: {\"type\": \"sys\", \"action\": \"start\"}\n3. 停止系统: {\"type\": \"sys\", \"action\": \"stop\"}\n4. 复位/重新扫描: {\"type\": \"sys\", \"action\": \"reset\"}\n5. 查询状态: {\"type\": \"query\", \"action\": \"status\"}\n\n示例：\n用户：\"把这个放到3号\" -> {\"type\": \"sort\", \"slot_id\": 3}"
+}
