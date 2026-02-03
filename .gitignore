@@ -17,3 +17,5 @@ logs/
 
 # 敏感配置 (可选，如果以后有API Key不想公开)
 # config/secrets.py
+
+generate_tree
