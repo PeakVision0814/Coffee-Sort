@@ -1,0 +1,115 @@
+/* web\static\css\style.css */
+
+/* 全局设置：专业灰白调 */
+body {
+    background-color: #f4f6f8;
+    color: #343a40;
+    font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
+}
+
+/* 顶部导航栏深蓝 */
+.bg-dark-blue {
+    background-color: #2c3e50; 
+}
+
+/* 监控画面容器 */
+.monitor-frame {
+    min-height: 400px;
+    background-color: #000;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.monitor-frame img {
+    max-width: 100%;
+    max-height: 480px;
+}
+
+/* 槽位样式：拟物化格子 */
+.slot-box {
+    background-color: #e9ecef;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    height: 90px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    transition: all 0.2s;
+    cursor: default;
+}
+
+.slot-number {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #adb5bd;
+}
+
+.slot-status {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: #6c757d;
+}
+
+/* 满载状态：变为实心色块 */
+.slot-full {
+    background-color: #fff3cd; /* 浅橙色背景 */
+    border-color: #ffc107;
+    color: #856404;
+}
+.slot-full .slot-number {
+    color: #856404;
+}
+.slot-full .slot-status {
+    color: #d39e00;
+}
+
+/* 如果你想满载是绿色的，可以用这个：
+.slot-full {
+    background-color: #d1e7dd;
+    border-color: #badbcc;
+    color: #0f5132;
+}
+*/
+
+/* 聊天框样式：气泡式 */
+.chat-container {
+    overflow-y: auto;
+    font-size: 0.9rem;
+}
+
+.chat-message {
+    margin-bottom: 8px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    max-width: 90%;
+}
+
+/* 用户消息靠右 */
+.msg.user {
+    background-color: #0d6efd;
+    color: white;
+    align-self: flex-end; /* 需要父容器 flex-column */
+    margin-left: auto;
+    border-bottom-right-radius: 0;
+}
+
+/* AI 消息靠左 */
+.msg.ai {
+    background-color: #e9ecef;
+    color: #333;
+    align-self: flex-start;
+    margin-right: auto;
+    border-bottom-left-radius: 0;
+}
+
+/* 系统消息居中或灰色 */
+.msg.system {
+    background-color: transparent;
+    color: #6c757d;
+    text-align: center;
+    font-size: 0.8rem;
+    width: 100%;
+    padding: 4px;
+}

@@ -1,5 +1,10 @@
 # config/settings.py
 
+# --- 🔴 仿真模式开关 ---
+# True = 在家开发 (使用虚拟硬件)
+# False = 在现场 (使用真实硬件)
+SIMULATION_MODE = True
+
 # --- 硬件通信 ---
 PORT = "COM3"
 BAUD = 115200

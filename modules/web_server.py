@@ -1,11 +1,28 @@
+import os
 from flask import Flask, render_template, Response, request, jsonify
 import cv2
 import threading
 import json
 import time
 
-# 初始化 Flask
-app = Flask(__name__, template_folder="../templates")
+# --- 🔥 路径配置关键修改开始 ---
+
+# 1. 获取当前文件 (web_server.py) 所在的目录 -> .../coffee_sort/modules
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# 2. 获取项目根目录 -> .../coffee_sort
+root_dir = os.path.dirname(current_dir)
+
+# 3. 拼接出 web 文件夹下的路径
+template_dir = os.path.join(root_dir, 'web', 'templates')
+static_dir = os.path.join(root_dir, 'web', 'static')
+
+# 4. 初始化 Flask，显式指定文件夹位置
+app = Flask(__name__, 
+            template_folder=template_dir, 
+            static_folder=static_dir)
+
+# --- 路径配置修改结束 ---
 
 # 全局引用 (将在 start_server 时被赋值)
 system_state = None
@@ -38,15 +55,19 @@ def chat():
     data = request.json
     user_text = data.get('message', '')
     
+    # 防止空消息
+    if not user_text:
+        return jsonify({"reply": "请输入指令"})
+
     # 1. 调用 AI 模块处理
-    # 注意：ai_module.process_text 现在应该返回 {reply: "...", command: {...}}
-    result = ai_module.process_text(user_text)
+    if ai_module:
+        result = ai_module.process_text(user_text)
+    else:
+        result = {"reply": "AI模块未连接", "command": None}
     
     # 2. 如果有控制指令，注入到全局状态机
-    if result.get('command'):
+    if result.get('command') and system_state:
         print(f"⚡ [Web] 注入指令: {result['command']}")
-        # 只有当不在自动模式时才允许插队，或者强制打断
-        # 这里我们将模式切换为 AI_WAIT，并设置指令
         system_state.mode = "AI_WAIT" 
         system_state.pending_ai_cmd = result['command']
     
@@ -55,6 +76,9 @@ def chat():
 @app.route('/command', methods=['POST'])
 def command():
     """处理快捷按钮"""
+    if not system_state:
+        return jsonify({"status": "error", "msg": "System not ready"})
+
     action = request.json.get('action')
     print(f"🔘 [Web] 按钮点击: {action}")
     
@@ -62,19 +86,27 @@ def command():
         system_state.mode = "AUTO"
     elif action == 'stop':
         system_state.mode = "IDLE"
+    
     elif action == 'scan':
-        # 这里只是置标志位，具体逻辑由 main.py 里的循环去执行
         system_state.pending_ai_cmd = {"type": "sys", "action": "scan"}
-        system_state.mode = "AI_WAIT" # 切换过去以便执行特殊指令
+        system_state.mode = "AI_WAIT" 
+        
     elif action == 'reset':
         system_state.pending_ai_cmd = {"type": "arm", "action": "go_home"}
         system_state.mode = "AI_WAIT"
         
+    elif action == 'clear_all': # 对应前端的清空库存
+        system_state.inventory = {i: 0 for i in range(1, 7)}
+        print("🧹 [Web] 库存已清空")
+
     return jsonify({"status": "ok"})
 
 @app.route('/status')
 def status():
     """前端轮询状态"""
+    if not system_state:
+        return jsonify({"inventory": {}, "mode": "OFFLINE"})
+        
     return jsonify({
         "inventory": system_state.inventory,
         "mode": system_state.mode
@@ -86,12 +118,13 @@ def start_flask(state_obj, ai_obj):
     system_state = state_obj
     ai_module = ai_obj
     
-    # 关闭 Flask 的启动提示，让控制台清爽点
+    # 关闭 Flask 的启动提示日志
     import logging
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
     
     print(">>> 🌐 Web 控制台已启动: http://127.0.0.1:5000")
+    # host='0.0.0.0' 允许局域网访问
     app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
 
 def update_frame(frame):

@@ -4,11 +4,8 @@ import sys
 import re
 
 # 尝试导入 OpenAI 库
-try:
-    from openai import OpenAI
-except ImportError:
-    print("❌ 错误: 未安装 openai 库。请运行 'pip install openai'")
-    OpenAI = None
+from openai import OpenAI
+
 
 # --- 🔥 关键开关 ---
 # True = 不花钱，用假数据测试逻辑
