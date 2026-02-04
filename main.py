@@ -12,7 +12,9 @@ from config import settings
 
 class SystemState:
     def __init__(self):
+        # 库存: 0=空(Empty), 1=满(Full)
         self.inventory = {i: 0 for i in range(1, 7)}
+        # 模式: IDLE(空闲), AUTO(自动), EXECUTING(执行中), CLEARING(清除模式)
         self.mode = "IDLE" 
         self.pending_task = None 
 
@@ -21,12 +23,12 @@ state = SystemState()
 def perform_pick_and_place(arm, target_slot):
     """
     工作线程：执行一次【固定点位】抓取放置
-    不再接受 vision_offset，完全盲抓
     """
+    previous_mode = state.mode
     state.mode = "EXECUTING"
     
     try:
-        # 1. 执行抓取 (无参，去默认点)
+        # 1. 执行抓取
         arm.pick()
 
         # 2. 执行放置
@@ -41,7 +43,11 @@ def perform_pick_and_place(arm, target_slot):
         arm.go_observe()
     
     finally:
-        state.mode = "IDLE"
+        # 恢复之前的模式
+        if previous_mode == "AUTO":
+            state.mode = "AUTO"
+        else:
+            state.mode = "IDLE"
 
 def get_first_empty_slot():
     for i in range(1, 7):
@@ -65,12 +71,14 @@ def main():
     web_thread.start()
 
     print("\n" + "="*50)
-    print("☕ 智能分拣系统 (盲抓版)")
+    print("☕ 智能分拣系统 (UI修复版)")
     print("="*50)
-    print(" [ 1-6 ] : 手动触发 - 抓取并放入指定槽位")
-    print(" [  A  ] : 自动模式 - 视觉检测到物体后自动抓取")
-    print(" [  R  ] : 归位")
-    print(" [  Q  ] : 退出")
+    print(" [ 1-6 ] : 抓取并放入指定槽位")
+    print(" [  C  ] : 🧹 一键清空所有库存")
+    print(" [  X  ] : 🗑️ 清除单个槽位")
+    print(" [  A  ] : 🤖 自动模式开关")
+    print(" [  R  ] : 🚀 强制归位")
+    print(" [  Q  ] : 🚪 退出")
     print("="*50)
 
     while True:
@@ -79,53 +87,104 @@ def main():
             time.sleep(0.1)
             continue
         
-        # 1. 视觉处理 (仅用于 UI 显示和自动模式触发判断)
+        # 1. 视觉处理 (Offset文字在 (10, 30))
         processed_frame, offset = vision.process_frame(frame)
         
-        cv2.putText(processed_frame, f"MODE: {state.mode}", (10, 30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        inv_str = " ".join([f"{k}:{'FULL' if v else '_'}" for k,v in state.inventory.items()])
-        cv2.putText(processed_frame, inv_str, (10, 460), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        # 2. UI 绘制 (向下错开位置)
+        
+        # --- 模式显示 (下移到 Y=70) ---
+        mode_str = f"MODE: {state.mode}"
+        mode_color = (0, 0, 255) if state.mode == "CLEARING" else (0, 255, 0)
+        
+        # (技巧) 先画黑色描边，增加对比度，防止背景太亮看不清
+        cv2.putText(processed_frame, mode_str, (12, 72), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 4)
+        cv2.putText(processed_frame, mode_str, (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, mode_color, 2)
+        
+        # --- 清除模式提示 (下移到 Y=100) ---
+        if state.mode == "CLEARING":
+            tip_str = "SELECT 1-6 TO CLEAR..."
+            cv2.putText(processed_frame, tip_str, (12, 102), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 4)
+            cv2.putText(processed_frame, tip_str, (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
+        # --- 库存状态 (底部) ---
+        for i in range(1, 7):
+            status = state.inventory[i]
+            color = (0, 0, 255) if status == 1 else (0, 255, 0) # 红满绿空
+            
+            # 位置计算
+            cx = 50 + (i-1) * 60
+            cy = 450
+            
+            # 画圆点
+            cv2.circle(processed_frame, (cx, cy), 15, (0,0,0), -1) # 黑底
+            cv2.circle(processed_frame, (cx, cy), 13, color, -1)   # 彩芯
+            
+            # 画数字
+            cv2.putText(processed_frame, str(i), (cx-5, cy+5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), 2)
+            
+            # 画文字状态
+            label = "FULL" if status else "FREE"
+            cv2.putText(processed_frame, label, (cx-20, cy+28), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,0), 3) # 黑边
+            cv2.putText(processed_frame, label, (cx-20, cy+28), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,255,255), 1)
 
         web_server.update_frame(processed_frame)
         cv2.imshow("Main Control", processed_frame)
         
+        # 3. 键盘交互
         key = cv2.waitKey(1) & 0xFF
         
         if key == ord('q'):
             break
+
         elif key == ord('r'):
             if state.mode != "EXECUTING":
                 arm.go_observe()
         
         elif key == ord('a'):
-            state.mode = "AUTO" if state.mode != "AUTO" else "IDLE"
-            print(f">>> 模式切换: {state.mode}")
+            if state.mode == "AUTO":
+                state.mode = "IDLE"
+                print(">>> ⏸️ 自动模式已暂停")
+            elif state.mode == "IDLE":
+                state.mode = "AUTO"
+                print(">>> ▶️ 进入自动流水线模式")
 
-        # 2. 手动指令 (1-6)
-        if state.mode == "IDLE" and (ord('1') <= key <= ord('6')):
+        elif key == ord('c'):
+            state.inventory = {i: 0 for i in range(1, 7)}
+            print("\n>>> 🧹 [系统] 库存状态已全部重置！")
+
+        elif key == ord('x'):
+            if state.mode == "IDLE" or state.mode == "AUTO":
+                state.mode = "CLEARING"
+                print("\n>>> 🗑️ [系统] 请按数字键 1-6 清除对应槽位...")
+            elif state.mode == "CLEARING":
+                state.mode = "IDLE"
+                print(">>> 🔙 已退出清除模式")
+
+        if ord('1') <= key <= ord('6'):
             slot_id = key - ord('0')
-            if state.inventory[slot_id] == 1:
-                print(f"⚠️ {slot_id}号位已满")
-            else:
-                print(f"🚀 [手动] 启动任务 -> {slot_id}号")
-                t = threading.Thread(target=perform_pick_and_place, args=(arm, slot_id))
-                t.start()
 
-        # 3. 自动模式 (视觉作为开关)
+            if state.mode == "CLEARING":
+                state.inventory[slot_id] = 0
+                print(f">>> 🗑️ {slot_id}号位状态已手动清除。")
+                state.mode = "IDLE"
+
+            elif state.mode == "IDLE":
+                if state.inventory[slot_id] == 1:
+                    print(f"⚠️ {slot_id}号位显示已满！(按 'C' 清空或 'X' 单删)")
+                else:
+                    print(f"🚀 [手动] 启动搬运 -> {slot_id}号")
+                    t = threading.Thread(target=perform_pick_and_place, args=(arm, slot_id))
+                    t.start()
+
         if state.mode == "AUTO" and offset:
-            # offset 不为 None，说明视野里有东西
-            # 我们不关心东西具体在哪里，只要有东西，就去默认点抓
             target_slot = get_first_empty_slot()
-            
             if target_slot:
                 print(f"🤖 [Auto] 视觉触发 -> 分拣至 {target_slot}号")
                 t = threading.Thread(target=perform_pick_and_place, args=(arm, target_slot))
                 t.start()
-                time.sleep(1.0) # 简单防抖
+                time.sleep(0.5) 
             else:
-                print("⚠️ 仓库已满")
+                print("⚠️ 仓库已满，自动模式暂停")
                 state.mode = "IDLE"
 
     cap.release()

@@ -22,7 +22,7 @@ class ArmController:
             self.mc.power_on()
             time.sleep(1)
             self.move_mode = 1  # 线性移动
-            self.speed = 40     
+            self.speed = 80
             
             self.gripper_open()
             
