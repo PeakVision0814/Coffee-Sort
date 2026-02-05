@@ -1,115 +1,131 @@
-/* web\static\css\style.css */
+/* web/static/css/style.css */
 
-/* 全局设置：专业灰白调 */
+/* 全局设置 */
 body {
-    background-color: #f4f6f8;
-    color: #343a40;
+    background-color: #f0f2f5; /* 更柔和的灰 */
     font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
 }
 
-/* 顶部导航栏深蓝 */
+/* 导航栏 */
 .bg-dark-blue {
-    background-color: #2c3e50; 
+    background-color: #1a2332;
+    border-bottom: 3px solid #0dcaf0; /* 底部青色亮条 */
 }
 
-/* 监控画面容器 */
+/* 状态指示灯 */
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    background-color: #6c757d;
+}
+.status-dot.online {
+    background-color: #00ff88;
+    box-shadow: 0 0 5px #00ff88;
+}
+
+/* 左侧监控区 */
 .monitor-frame {
-    min-height: 400px;
     background-color: #000;
-    border-radius: 4px;
     overflow: hidden;
-}
-
-.monitor-frame img {
-    max-width: 100%;
-    max-height: 480px;
-}
-
-/* 槽位样式：拟物化格子 */
-.slot-box {
-    background-color: #e9ecef;
-    border: 1px solid #dee2e6;
     border-radius: 6px;
-    height: 90px;
     display: flex;
-    flex-direction: column;
     justify-content: center;
     align-items: center;
+}
+.monitor-frame img {
+    height: 100%;
+    object-fit: contain;
+}
+
+/* 槽位格子 (更紧凑) */
+.slot-box {
+    background-color: #fff;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    height: 60px; /* 变矮一点 */
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 15px;
     transition: all 0.2s;
-    cursor: default;
 }
 
 .slot-number {
-    font-size: 1.5rem;
     font-weight: 700;
-    color: #adb5bd;
+    color: #ced4da;
+    font-size: 1.2rem;
 }
 
 .slot-status {
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     font-weight: 600;
-    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background-color: #e9ecef;
     color: #6c757d;
 }
 
-/* 满载状态：变为实心色块 */
+/* 满载高亮 */
 .slot-full {
-    background-color: #fff3cd; /* 浅橙色背景 */
-    border-color: #ffc107;
-    color: #856404;
+    border-left: 4px solid #ffc107; /* 左侧橙色条 */
+    background-color: #fff;
 }
-.slot-full .slot-number {
-    color: #856404;
-}
+.slot-full .slot-number { color: #495057; }
 .slot-full .slot-status {
-    color: #d39e00;
+    background-color: #ffc107;
+    color: #000;
 }
 
-/* 如果你想满载是绿色的，可以用这个：
-.slot-full {
-    background-color: #d1e7dd;
-    border-color: #badbcc;
-    color: #0f5132;
-}
-*/
+/* --- 右侧 AI 面板核心 --- */
 
-/* 聊天框样式：气泡式 */
+.ai-panel {
+    border-radius: 12px;
+    overflow: hidden;
+}
+
 .chat-container {
-    overflow-y: auto;
-    font-size: 0.9rem;
+    background-color: #f8f9fa;
+    /* 自定义滚动条 */
+    scrollbar-width: thin;
+    scrollbar-color: #dee2e6 #f8f9fa;
 }
 
+/* 聊天气泡 */
 .chat-message {
-    margin-bottom: 8px;
-    padding: 8px 12px;
-    border-radius: 8px;
-    max-width: 90%;
+    margin-bottom: 16px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    max-width: 80%;
+    position: relative;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    line-height: 1.5;
 }
 
-/* 用户消息靠右 */
-.msg.user {
-    background-color: #0d6efd;
-    color: white;
-    align-self: flex-end; /* 需要父容器 flex-column */
-    margin-left: auto;
-    border-bottom-right-radius: 0;
-}
-
-/* AI 消息靠左 */
+/* AI 气泡 */
 .msg.ai {
-    background-color: #e9ecef;
+    background-color: #fff;
+    border-top-left-radius: 2px; /* 左上角直角 */
     color: #333;
     align-self: flex-start;
     margin-right: auto;
-    border-bottom-left-radius: 0;
+    border: 1px solid #e9ecef;
 }
 
-/* 系统消息居中或灰色 */
+/* 用户气泡 */
+.msg.user {
+    background-color: #0d6efd; /* 蓝色 */
+    color: white;
+    border-top-right-radius: 2px; /* 右上角直角 */
+    align-self: flex-end;
+    margin-left: auto;
+}
+
+/* 系统消息 */
 .msg.system {
-    background-color: transparent;
-    color: #6c757d;
-    text-align: center;
-    font-size: 0.8rem;
-    width: 100%;
-    padding: 4px;
+    max-width: 100%;
+    background: none;
+    box-shadow: none;
+    font-size: 0.85rem;
 }

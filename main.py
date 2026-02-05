@@ -18,15 +18,11 @@ else:
 
 class SystemState:
     def __init__(self):
-        # 库存
         self.inventory = {i: 0 for i in range(1, 7)}
-        # 模式
         self.mode = "IDLE" 
-        # 待处理指令 (修复了名字)
         self.pending_ai_cmd = None 
-        # 心跳时间戳 (用于检测浏览器是否关闭)
-        # 初始化为当前时间 + 15秒 (给浏览器启动留出15秒缓冲时间)
         self.last_heartbeat = time.time() + 15.0 
+        # 我们不再需要 ai_enabled 变量，前端直接根据 mode 判断互斥
 
 state = SystemState()
 
@@ -35,22 +31,47 @@ def perform_pick_and_place(arm, target_slot):
     state.mode = "EXECUTING"
     try:
         arm.pick()
+        # --- 粗颗粒度安全检查 ---
+        # 如果在抓取过程中用户点了暂停，state.mode 会变成 IDLE (虽然这里被覆盖了，但全局会被改)
+        # 但为了安全，一旦抓起来了，必须放下，不能停在半空。
+        # 所以这里我们不检测暂停，必须跑完。
+        
         arm.place(target_slot)
         state.inventory[target_slot] = 1
         print(f"✅ [System] {target_slot}号位 已满")
+
     except Exception as e:
         print(f"❌ [System] 执行出错: {e}")
         arm.go_observe()
+    
     finally:
-        if previous_mode == "AUTO":
+        # 任务结束
+        # 关键逻辑：如果任务开始前是 AUTO，且中间没有被改为 IDLE，那就保持 AUTO
+        # 但如果用户中间按了暂停，main loop 会把 pending_task 处理掉并把 mode 设为 IDLE
+        # 这里的线程内局部变量 previous_mode 可能过时了。
+        
+        # 修正逻辑：
+        # 只有当全局模式依然是 EXECUTING (意味着没人打断) 时，才恢复 AUTO
+        # 如果用户点了暂停，全局模式已经被改成了 IDLE (在 main loop 里)，这里就不应该改回 AUTO
+        pass 
+        # 实际上由 main loop 控制状态流转更安全，这里只负责把 EXECUTING 拿掉
+        
+        # 简单处理：线程结束，状态交给 main loop 决定
+        # 如果本来是 AUTO，跑完这一单，main loop 发现还是 AUTO，就会起新线程。
+        # 如果用户点了 Stop，main loop 会把 mode 改成 IDLE。
+        # 唯一的问题是：main loop 此时是 EXECUTING，它不会改状态。
+        
+        # 最终方案：
+        if state.mode == "EXECUTING":
+            # 如果没被外部打断，恢复为 AUTO，让 main loop 继续跑
             state.mode = "AUTO"
         else:
-            state.mode = "IDLE"
+            # 如果被改成了 IDLE (说明用户点了暂停)，那就保持 IDLE
+            print(">>> [System] 动作完成，响应暂停指令，停止流水线。")
 
 def get_first_empty_slot():
     for i in range(1, 7):
-        if state.inventory[i] == 0:
-            return i
+        if state.inventory[i] == 0: return i
     return None
 
 def main():
@@ -59,22 +80,17 @@ def main():
     ai = AIDecisionMaker()
     
     if settings.SIMULATION_MODE:
-        print("📷 [Main] 使用虚拟摄像头")
         cap = MockCamera()
     else:
-        print("📷 [Main] 尝试连接真实摄像头...")
         cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
-    if arm.mc:
-        arm.go_observe()
+    if arm.mc: arm.go_observe()
 
-    # 1. 启动 Web 服务器
     web_thread = threading.Thread(target=web_server.start_flask, args=(state, ai), daemon=True)
     web_thread.start()
 
-    # 2. 自动打开浏览器
     print(">>> 🌐 正在打开 Web 控制台...")
     time.sleep(1.0)
     webbrowser.open("http://127.0.0.1:5000")
@@ -82,82 +98,67 @@ def main():
     print("\n" + "="*50)
     print("☕ 智能分拣系统 (Web 托管模式)")
     print("="*50)
-    print(" ✅ 本地窗口已隐藏")
-    print(" ✅ 浏览器关闭后程序将自动退出")
-    print("="*50)
 
     try:
         while True:
-            # --- 🔥 心跳检测机制 ---
-            # 如果超过 3 秒没有收到前端的心跳包，且已经过了启动缓冲期
             if time.time() - state.last_heartbeat > 3.0:
-                print("\n>>> 💔 检测到浏览器已关闭 (心跳丢失)")
-                print(">>> 👋 程序正在退出...")
-                break # 跳出循环，结束程序
+                print("\n>>> 💔 检测到浏览器已关闭")
+                break
 
             ret, frame = cap.read()
             if not ret: 
                 time.sleep(0.1)
                 continue
             
-            # 1. 视觉处理
             processed_frame, offset = vision.process_frame(frame)
             
-            # 2. UI 绘制 (为了 Web 显示)
-            mode_str = f"MODE: {state.mode}"
-            mode_color = (0, 0, 255) if state.mode == "CLEARING" else (0, 255, 0)
-            
-            cv2.putText(processed_frame, mode_str, (12, 72), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 4)
-            cv2.putText(processed_frame, mode_str, (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, mode_color, 2)
-            
-            if state.mode == "CLEARING":
-                tip_str = "SELECT 1-6 TO CLEAR..."
-                cv2.putText(processed_frame, tip_str, (12, 102), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 4)
-                cv2.putText(processed_frame, tip_str, (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-
-            for i in range(1, 7):
-                status = state.inventory[i]
-                color = (0, 0, 255) if status == 1 else (0, 255, 0)
-                cx = 50 + (i-1) * 60
-                cy = 450
-                cv2.circle(processed_frame, (cx, cy), 15, (0,0,0), -1)
-                cv2.circle(processed_frame, (cx, cy), 13, color, -1)
-                cv2.putText(processed_frame, str(i), (cx-5, cy+5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), 2)
-                label = "FULL" if status else "FREE"
-                cv2.putText(processed_frame, label, (cx-20, cy+28), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,0), 3)
-                cv2.putText(processed_frame, label, (cx-20, cy+28), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,255,255), 1)
-
-            # 3. 推送画面
-            web_server.update_frame(processed_frame)
-
-            # 4. 处理 Web 指令
+            # --- 处理指令 ---
             if state.pending_ai_cmd:
                 cmd = state.pending_ai_cmd
-                print(f"🤖 [Main] 执行 Web 指令: {cmd}")
+                action = cmd.get('action')
+                print(f"🤖 [Main] 收到指令: {action}")
                 
-                if cmd.get('action') == 'go_home':
-                    if state.mode != "EXECUTING":
-                        arm.go_observe()
+                if action == 'start':
+                    if state.mode == "IDLE":
+                        state.mode = "AUTO"
+                        print(">>> [CMD] 自动模式启动")
+                
+                elif action == 'stop':
+                    # 关键：如果正在执行，不要强制改为 IDLE，否则线程里的 finally 会乱
+                    # 我们做一个标记，或者直接改。
+                    # 刚才的线程逻辑是：if state.mode == "EXECUTING" -> AUTO
+                    # 所以这里我们把 mode 强制改为 IDLE。
+                    # 线程里的 finally 检测到 mode 不是 EXECUTING 了，就不会恢复 AUTO。
+                    state.mode = "IDLE"
+                    print(">>> [CMD] 暂停请求已确认 (将在当前动作完成后停止)")
+
+                elif action == 'go_home':
+                    if state.mode != "EXECUTING": arm.go_observe()
                     state.mode = "IDLE"
                 
-                elif cmd.get('action') == 'scan':
-                    pass
+                elif action == 'clear_all':
+                    state.inventory = {i: 0 for i in range(1, 7)}
 
                 state.pending_ai_cmd = None
-                if state.mode == "AI_WAIT":
-                    state.mode = "IDLE"
 
-            # 5. 自动模式逻辑
+            web_server.update_frame(processed_frame)
+
+            # 自动模式触发
             fake_detect = (settings.SIMULATION_MODE and False)
+            
+            # 只有在 mode 为 AUTO 时才触发新任务
+            # 如果是 EXECUTING，说明正在跑，不触发
+            # 如果是 IDLE，说明暂停了，不触发
             if state.mode == "AUTO" and (offset or fake_detect):
                 target_slot = get_first_empty_slot()
                 if target_slot:
                     print(f"🤖 [Auto] 触发分拣 -> {target_slot}号")
                     t = threading.Thread(target=perform_pick_and_place, args=(arm, target_slot))
                     t.start()
-                    time.sleep(1.0) 
+                    # 给一点时间让线程把状态改为 EXECUTING
+                    time.sleep(0.5) 
                 else:
-                    print("⚠️ 仓库已满，自动模式暂停")
+                    print("⚠️ 仓库已满，自动暂停")
                     state.mode = "IDLE"
 
             time.sleep(0.03)
@@ -167,7 +168,6 @@ def main():
     finally:
         cap.release()
         cv2.destroyAllWindows()
-        # 确保 Web 线程也能退出（虽然是 daemon 但显式退出更好）
         sys.exit(0)
 
 if __name__ == "__main__":
