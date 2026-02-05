@@ -21,57 +21,58 @@ class SystemState:
         self.inventory = {i: 0 for i in range(1, 7)}
         self.mode = "IDLE" 
         self.pending_ai_cmd = None 
-        self.last_heartbeat = time.time() + 15.0 
-        # 我们不再需要 ai_enabled 变量，前端直接根据 mode 判断互斥
+        self.last_heartbeat = time.time() + 15.0
+        # 🔥 新增：系统消息队列 (用于后端主动给前端发弹幕)
+        self.system_msg = None 
 
 state = SystemState()
 
-def perform_pick_and_place(arm, target_slot):
-    previous_mode = state.mode
-    state.mode = "EXECUTING"
+# 🔥 修改：增加 active_mode 参数，区分是“自动运行中”还是“单次任务中”
+def perform_pick_and_place(arm, target_slot, active_mode="SINGLE_TASK", restore_mode="IDLE"):
+    """
+    工作线程：执行一次抓取放置
+    active_mode: 执行过程中系统显示的状态 (SINGLE_TASK / AUTO)
+    restore_mode: 任务结束后系统应该恢复的模式 (IDLE / AUTO)
+    """
     try:
-        arm.pick()
-        # --- 粗颗粒度安全检查 ---
-        # 如果在抓取过程中用户点了暂停，state.mode 会变成 IDLE (虽然这里被覆盖了，但全局会被改)
-        # 但为了安全，一旦抓起来了，必须放下，不能停在半空。
-        # 所以这里我们不检测暂停，必须跑完。
+        # 切换到“忙碌”状态
+        state.mode = active_mode
         
+        arm.pick()
+        
+        # 安全检查：如果在抓取过程中用户点了暂停 (mode 被改成了 IDLE)
+        # 只有在全自动模式下才需要响应暂停，单次任务通常硬着头皮做完
+        if state.mode == "IDLE" and restore_mode == "AUTO":
+            print(">>> [System] 检测到暂停信号，任务完成后将停止")
+            restore_mode = "IDLE"
+
         arm.place(target_slot)
         state.inventory[target_slot] = 1
+        
+        # 🔥 成功反馈：直接推送到聊天框
+        state.system_msg = f"✅ 执行完毕。物品已成功放入 {target_slot}号槽位。"
         print(f"✅ [System] {target_slot}号位 已满")
 
     except Exception as e:
-        print(f"❌ [System] 执行出错: {e}")
+        err_str = f"❌ 执行出错: {e}"
+        print(f"[System] {err_str}")
+        state.system_msg = err_str
         arm.go_observe()
+        restore_mode = "IDLE" 
     
     finally:
-        # 任务结束
-        # 关键逻辑：如果任务开始前是 AUTO，且中间没有被改为 IDLE，那就保持 AUTO
-        # 但如果用户中间按了暂停，main loop 会把 pending_task 处理掉并把 mode 设为 IDLE
-        # 这里的线程内局部变量 previous_mode 可能过时了。
-        
-        # 修正逻辑：
-        # 只有当全局模式依然是 EXECUTING (意味着没人打断) 时，才恢复 AUTO
-        # 如果用户点了暂停，全局模式已经被改成了 IDLE (在 main loop 里)，这里就不应该改回 AUTO
-        pass 
-        # 实际上由 main loop 控制状态流转更安全，这里只负责把 EXECUTING 拿掉
-        
-        # 简单处理：线程结束，状态交给 main loop 决定
-        # 如果本来是 AUTO，跑完这一单，main loop 发现还是 AUTO，就会起新线程。
-        # 如果用户点了 Stop，main loop 会把 mode 改成 IDLE。
-        # 唯一的问题是：main loop 此时是 EXECUTING，它不会改状态。
-        
-        # 最终方案：
-        if state.mode == "EXECUTING":
-            # 如果没被外部打断，恢复为 AUTO，让 main loop 继续跑
-            state.mode = "AUTO"
+        # 任务结束，恢复状态
+        # 只有当前没被强制打断时，才恢复
+        if state.mode == active_mode:
+            state.mode = restore_mode
+            print(f">>> [System] 任务结束，模式切换为: {state.mode}")
         else:
-            # 如果被改成了 IDLE (说明用户点了暂停)，那就保持 IDLE
-            print(">>> [System] 动作完成，响应暂停指令，停止流水线。")
+            print(f">>> [System] 任务结束，保持当前模式: {state.mode}")
 
 def get_first_empty_slot():
     for i in range(1, 7):
-        if state.inventory[i] == 0: return i
+        if state.inventory[i] == 0:
+            return i
     return None
 
 def main():
@@ -112,53 +113,120 @@ def main():
             
             processed_frame, offset = vision.process_frame(frame)
             
-            # --- 处理指令 ---
+            # --- 处理 Web/AI 指令 ---
             if state.pending_ai_cmd:
                 cmd = state.pending_ai_cmd
-                action = cmd.get('action')
-                print(f"🤖 [Main] 收到指令: {action}")
                 
-                if action == 'start':
+                cmd_action = cmd.get('action')
+                cmd_type = cmd.get('type')          
+                
+                print(f"🤖 [Main] 收到原始数据: {cmd}")
+
+                # --- A: 系统指令 ---
+                if cmd_action == 'start':
                     if state.mode == "IDLE":
                         state.mode = "AUTO"
                         print(">>> [CMD] 自动模式启动")
                 
-                elif action == 'stop':
-                    # 关键：如果正在执行，不要强制改为 IDLE，否则线程里的 finally 会乱
-                    # 我们做一个标记，或者直接改。
-                    # 刚才的线程逻辑是：if state.mode == "EXECUTING" -> AUTO
-                    # 所以这里我们把 mode 强制改为 IDLE。
-                    # 线程里的 finally 检测到 mode 不是 EXECUTING 了，就不会恢复 AUTO。
+                elif cmd_action == 'stop':
                     state.mode = "IDLE"
-                    print(">>> [CMD] 暂停请求已确认 (将在当前动作完成后停止)")
+                    print(">>> [CMD] 暂停请求已确认")
 
-                elif action == 'go_home':
-                    if state.mode != "EXECUTING": arm.go_observe()
-                    state.mode = "IDLE"
+                # ... (前面代码不变)
+
+                elif cmd_action == 'reset' or cmd_action == 'go_home':
+                    if state.mode in ["AUTO", "SINGLE_TASK"]:
+                        # 拟人化拒绝
+                        msg = "⚠️ 无法复位：当前正在作业中，请先等待任务结束。"
+                        print(msg)
+                        state.system_msg = msg
+                    else:
+                        arm.go_observe()
+                        state.mode = "IDLE"
+                        # 拟人化成功
+                        state.system_msg = "✅ 机械臂已回到初始观测姿态。"
                 
-                elif action == 'clear_all':
-                    state.inventory = {i: 0 for i in range(1, 7)}
+                elif cmd_action == 'clear_all':
+                    if state.mode in ["AUTO", "SINGLE_TASK"]:
+                        state.system_msg = "⚠️ 无法操作：作业中禁止清空库存数据。"
+                    else:
+                        state.inventory = {i: 0 for i in range(1, 7)}
+                        state.system_msg = "🗑️ 数据已重置，所有库存状态已清空。"
+
+                # --- 扫描逻辑 ---
+                elif cmd_action == 'scan':
+                    report = []
+                    for i in range(1, 7):
+                        status = "已满" if state.inventory[i] == 1 else "空闲"
+                        report.append(f"{i}号[{status}]")
+                    
+                    full_report = "📊 扫描完成，当前库存情况如下：\n" + "\n".join(report)
+                    print(f">>> [Scan] {full_report}")
+                    state.system_msg = full_report
+
+                elif cmd_type == 'inventory_update':
+                    slot_id = cmd.get('slot_id')
+                    new_status = cmd.get('status') # 0 or 1
+                    
+                    if slot_id and isinstance(slot_id, int) and 1 <= slot_id <= 6:
+                        # 更新内存状态
+                        state.inventory[slot_id] = new_status
+                        
+                        status_text = "已满" if new_status == 1 else "空闲"
+                        msg = f"✅ 已手动更新：{slot_id}号槽位状态设为 [{status_text}]"
+                        print(f">>> [Inventory] {msg}")
+                        state.system_msg = msg
+                    else:
+                        state.system_msg = f"⚠️ 更新失败：无效参数 {cmd}"
+
+
+                # --- 分拣逻辑 ---
+                elif cmd_type == 'sort':
+                    slot_id = cmd.get('slot_id')
+                    
+                    if slot_id and isinstance(slot_id, int) and 1 <= slot_id <= 6:
+                        if state.mode != "IDLE":
+                            state.system_msg = f"⚠️ 指令排队失败：系统正忙 (模式:{state.mode})。"
+                        
+                        elif state.inventory[slot_id] == 1:
+                            # 🔥 拟人化报错
+                            err_msg = f"⚠️ 无法执行：检测到 {slot_id}号槽位已经满了。"
+                            print(err_msg)
+                            state.system_msg = err_msg
+                        
+                        else:
+                            print(f"🤖 [AI] 触发单次分拣 -> {slot_id}号")
+                            state.mode = "EXECUTING"
+                            t = threading.Thread(target=perform_pick_and_place, args=(arm, slot_id, "SINGLE_TASK", "IDLE"))
+                            t.start()
+                    else:
+                        state.system_msg = f"⚠️ 指令错误：无效的槽位 ID ({slot_id})。"
+
+                # ... (后面代码不变)
 
                 state.pending_ai_cmd = None
 
             web_server.update_frame(processed_frame)
 
-            # 自动模式触发
+            # --- 自动模式循环 ---
             fake_detect = (settings.SIMULATION_MODE and False)
             
-            # 只有在 mode 为 AUTO 时才触发新任务
-            # 如果是 EXECUTING，说明正在跑，不触发
-            # 如果是 IDLE，说明暂停了，不触发
+            # 只有 AUTO 模式才自动触发
             if state.mode == "AUTO" and (offset or fake_detect):
                 target_slot = get_first_empty_slot()
                 if target_slot:
                     print(f"🤖 [Auto] 触发分拣 -> {target_slot}号")
-                    t = threading.Thread(target=perform_pick_and_place, args=(arm, target_slot))
+                    # 自动模式下，执行时状态依然算 AUTO (或细分为 AUTO_RUNNING)
+                    # 这里为了配合 app.js，我们保持 AUTO 即可，或者用 SINGLE_TASK 但 app.js 认为是自动
+                    # 简单起见，这里不需要改 state.mode，perform_pick_and_place 会设为 active_mode
+                    
+                    t = threading.Thread(target=perform_pick_and_place, args=(arm, target_slot, "AUTO", "AUTO"))
                     t.start()
-                    # 给一点时间让线程把状态改为 EXECUTING
+                    
                     time.sleep(0.5) 
                 else:
                     print("⚠️ 仓库已满，自动暂停")
+                    state.system_msg = "⚠️ 仓库已满，流水线自动暂停"
                     state.mode = "IDLE"
 
             time.sleep(0.03)

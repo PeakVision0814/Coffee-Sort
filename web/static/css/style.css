@@ -95,12 +95,19 @@ body {
 /* 聊天气泡 */
 .chat-message {
     margin-bottom: 16px;
-    padding: 12px 16px;
+    padding: 10px 16px;  /* 稍微调小一点内边距，更精致 */
     border-radius: 12px;
-    max-width: 80%;
+    
+    /* 🔥 核心修改：让宽度自适应内容，不再是一长条 */
+    width: fit-content; 
+    max-width: 80%;      /* 最大不超过父容器的 80% */
+    
     position: relative;
     box-shadow: 0 1px 2px rgba(0,0,0,0.05);
     line-height: 1.5;
+    
+    /* 防止长英文单词撑破布局 */
+    word-break: break-word; 
 }
 
 /* AI 气泡 */
@@ -108,8 +115,11 @@ body {
     background-color: #fff;
     border-top-left-radius: 2px; /* 左上角直角 */
     color: #333;
+    
+    /* 靠左对齐 */
     align-self: flex-start;
-    margin-right: auto;
+    margin-right: auto; 
+    
     border: 1px solid #e9ecef;
 }
 
@@ -118,14 +128,58 @@ body {
     background-color: #0d6efd; /* 蓝色 */
     color: white;
     border-top-right-radius: 2px; /* 右上角直角 */
+    
+    /* 靠右对齐 */
     align-self: flex-end;
-    margin-left: auto;
+    margin-left: auto; 
 }
 
 /* 系统消息 */
 .msg.system {
-    max-width: 100%;
+    /* 系统消息需要特殊处理，让它居中 */
+    width: auto;         /* 或者是 fit-content */
+    max-width: 90%;
+    margin-left: auto;
+    margin-right: auto;
+    align-self: center;
+    
     background: none;
     box-shadow: none;
     font-size: 0.85rem;
+    color: #6c757d;
+    text-align: center;
+    padding: 4px;
+}
+
+/* 等待动画：跳动的三个点 */
+.typing-indicator {
+    display: inline-block;
+    margin-left: 5px;
+}
+
+.typing-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: #6c757d;
+    animation: typing 1.4s infinite ease-in-out both;
+    margin: 0 1px;
+}
+
+.typing-dot:nth-child(1) { animation-delay: -0.32s; }
+.typing-dot:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes typing {
+    0%, 80%, 100% { transform: scale(0); }
+    40% { transform: scale(1); }
+}
+
+/* 确保系统追加的消息和上一条有一定间距 */
+.system-append-msg {
+    display: block;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed #e9ecef;
+    color: #495057;
 }

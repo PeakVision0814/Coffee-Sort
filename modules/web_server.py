@@ -39,7 +39,6 @@ def heartbeat():
     if system_state: system_state.last_heartbeat = time.time()
     return jsonify("ok")
 
-# --- 设置相关接口 ---
 @app.route('/api/settings', methods=['GET'])
 def get_settings():
     try:
@@ -61,10 +60,9 @@ def save_settings():
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    # 🔥 修复逻辑：不再依赖 ai_enabled，而是根据模式判断
-    # 只有在 IDLE (空闲) 模式下，才允许 AI 介入
-    if system_state and system_state.mode != "IDLE":
-        return jsonify({"reply": "⛔ 自动模式运行中，AI 已锁定。请先暂停流水线。"})
+    # 🔥 允许 IDLE 和 SINGLE_TASK (AI触发的任务) 接收指令，只有 AUTO 模式拒绝
+    if system_state and system_state.mode == "AUTO":
+        return jsonify({"reply": "⛔ 自动流水线运行中，AI 已锁定。"})
 
     data = request.json
     user_text = data.get('message', '')
@@ -102,10 +100,15 @@ def command():
 def status():
     if not system_state: return jsonify({"inventory": {}, "mode": "OFFLINE"})
     
-    # 🔥 修复逻辑：移除了 ai_enabled 字段
+    # 🔥 核心修改：取出 system_msg 并发送给前端，然后清空
+    msg = system_state.system_msg
+    if msg:
+        system_state.system_msg = None # 阅后即焚
+
     return jsonify({
         "inventory": system_state.inventory,
-        "mode": system_state.mode
+        "mode": system_state.mode,
+        "system_msg": msg # 将消息带给前端
     })
 
 def start_flask(state_obj, ai_obj):
@@ -115,7 +118,6 @@ def start_flask(state_obj, ai_obj):
     import logging
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
-    # host='0.0.0.0' 允许局域网访问
     app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
 
 def update_frame(frame):
