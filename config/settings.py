@@ -3,7 +3,7 @@
 # --- 🔴 仿真模式开关 ---
 # True = 在家开发 (使用虚拟硬件)
 # False = 在现场 (使用真实硬件)
-SIMULATION_MODE = True
+SIMULATION_MODE = False
 
 # --- 硬件通信 ---
 PORT = "COM3"

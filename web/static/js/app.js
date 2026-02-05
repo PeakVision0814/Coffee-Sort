@@ -1,13 +1,26 @@
-// web/static/js/app.js
-// 页面加载完成后执行
 document.addEventListener('DOMContentLoaded', function() {
     console.log("System Ready.");
     initInventoryGrid();
-    // 启动定时轮询状态 (每1秒一次)
+    
+    // 每 1 秒获取状态
     setInterval(fetchStatus, 1000);
+
+    // 🔥 每 1 秒发送心跳包 (保活)
+    setInterval(sendHeartbeat, 1000);
 });
 
-// 初始化 6 个槽位的 HTML
+// --- 新增：发送心跳 ---
+function sendHeartbeat() {
+    fetch('/heartbeat', { method: 'POST' })
+        .catch(err => {
+            // 如果心跳发送失败，说明后台可能挂了
+            console.warn("Heartbeat failed:", err);
+            document.getElementById('sys-mode').innerText = "OFFLINE";
+            document.getElementById('sys-mode').className = "badge bg-danger";
+        });
+}
+// --------------------
+
 function initInventoryGrid() {
     const container = document.getElementById('inventory-grid');
     container.innerHTML = '';
@@ -24,18 +37,26 @@ function initInventoryGrid() {
     }
 }
 
-// 获取后台状态
 function fetchStatus() {
     fetch('/status')
         .then(response => response.json())
         .then(data => {
+            if(data.mode === "OFFLINE") return;
             updateInventory(data.inventory);
-            document.getElementById('sys-mode').innerText = data.mode;
+            const badge = document.getElementById('sys-mode');
+            badge.innerText = data.mode;
+            // 根据模式变色
+            if (data.mode === 'AUTO' || data.mode === 'EXECUTING') {
+                badge.className = "badge bg-success";
+            } else if (data.mode === 'AI_WAIT') {
+                badge.className = "badge bg-info text-dark";
+            } else {
+                badge.className = "badge bg-warning text-dark";
+            }
         })
         .catch(err => console.error("Status fetch error:", err));
 }
 
-// 更新库存 UI
 function updateInventory(inventory) {
     for (let i = 1; i <= 6; i++) {
         const el = document.getElementById(`slot-${i}`);
@@ -51,7 +72,6 @@ function updateInventory(inventory) {
     }
 }
 
-// 发送控制指令
 function sendCommand(action) {
     fetch('/command', {
         method: 'POST',
@@ -60,21 +80,18 @@ function sendCommand(action) {
     }).then(res => res.json())
       .then(data => {
           console.log(`Command ${action}:`, data);
-          appendChat("System", `Executing: ${action.toUpperCase()}`, "system");
+          appendChat("System", `Command Sent: ${action.toUpperCase()}`, "system");
       });
 }
 
-// 发送 AI 聊天
 function sendChat() {
     const input = document.getElementById('user-input');
     const text = input.value.trim();
     if (!text) return;
 
-    // 1. 显示用户的话
     appendChat("You", text, "user");
     input.value = '';
 
-    // 2. 发给后台
     fetch('/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -82,31 +99,26 @@ function sendChat() {
     })
     .then(res => res.json())
     .then(data => {
-        // 3. 显示 AI 回复
         appendChat("AI", data.reply, "ai");
     });
 }
 
-// 辅助：往聊天框加文字
 function appendChat(sender, text, type) {
     const box = document.getElementById('chat-box');
     const div = document.createElement('div');
     
-    // 组合类名：chat-message 是基础样式，type (user/ai/system) 控制颜色和位置
     div.className = `chat-message msg ${type}`;
     
     if (type === 'system') {
         div.innerHTML = `${text}`;
     } else {
-        // 给名字加个小标题
         div.innerHTML = `<strong>${sender}:</strong> ${text}`;
     }
     
     box.appendChild(div);
-    box.scrollTop = box.scrollHeight; // 自动滚到底部
+    box.scrollTop = box.scrollHeight;
 }
 
-// 辅助：回车发送
 function handleEnter(e) {
     if (e.key === 'Enter') sendChat();
 }
