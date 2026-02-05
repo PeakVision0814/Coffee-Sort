@@ -35,7 +35,7 @@
 
 ### 1. 环境准备
 
-确保已安装 [Git](https://www.google.com/search?q=https://git-scm.com/) 和 [Miniconda](https://docs.anaconda.com/miniconda/)。
+确保已安装 [Git](docs/Environment%20Setup/git.md) 和 [Anaconda](docs/Environment%20Setup/Anaconda.md)。
 
 ```bash
 # 克隆项目
