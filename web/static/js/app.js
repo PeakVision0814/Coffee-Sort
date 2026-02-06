@@ -1,7 +1,5 @@
 let settingsModal;
 let currentMode = "IDLE"; 
-
-// 🔥 新增：用于记录当前正在等待后续系统消息的 AI 气泡 DOM 元素
 let activeAiBubble = null;
 
 const PROVIDER_DEFAULTS = {
@@ -16,11 +14,25 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log("系统就绪");
     initInventoryGrid();
     settingsModal = new bootstrap.Modal(document.getElementById('settingsModal'));
-    
     setInterval(fetchStatus, 1000);
     setInterval(sendHeartbeat, 1000);
     refreshModelDisplay();
 });
+
+// 🔥 辅助函数：打字机效果
+function typeWriter(element, text, speed = 30) {
+    let i = 0;
+    function type() {
+        if (i < text.length) {
+            element.innerHTML += text.charAt(i);
+            i++;
+            const box = document.getElementById('chat-box');
+            box.scrollTop = box.scrollHeight;
+            setTimeout(type, speed);
+        }
+    }
+    type();
+}
 
 function refreshModelDisplay() {
     fetch('/api/settings').then(res => res.json()).then(data => {
@@ -28,14 +40,22 @@ function refreshModelDisplay() {
     }).catch(err => {});
 }
 
+// 🔥 修复 1: 点击逻辑也要包含 EXECUTING
 function toggleSystemMode() {
-    if (currentMode === 'AUTO' || currentMode === 'SINGLE_TASK') {
+    // 如果是 自动模式 或 正在执行自动任务，点击意味着停止
+    if (currentMode === 'AUTO' || currentMode === 'EXECUTING') {
         sendCommand('stop');
-    } else {
+    } 
+    // 如果是 单次任务，点击也是停止/复位
+    else if (currentMode === 'SINGLE_TASK') {
+        sendCommand('stop'); 
+    } 
+    else {
         sendCommand('start');
     }
 }
 
+// 🔥 修复 2: UI 状态映射
 function updateUIState(mode) {
     currentMode = mode; 
     const btnMain = document.getElementById('btn-main-toggle');
@@ -45,38 +65,48 @@ function updateUIState(mode) {
     const chatBtn = document.getElementById('btn-send');
     const chatBox = document.getElementById('chat-box');
 
-    if (mode === 'AUTO') {
+    // --- 状态 A: 自动流水线 (包含 AUTO 和 EXECUTING) ---
+    // 只要是这两者之一，都视为"自动模式运行中"
+    if (mode === 'AUTO' || mode === 'EXECUTING') {
         btnMain.className = "btn btn-danger btn-lg w-100 mb-3 py-3 fw-bold shadow-sm";
         btnMain.innerHTML = '<i class="fas fa-stop-circle me-2"></i> 停止自动运行 (启用 AI)';
         statusText.innerHTML = '<span class="text-danger"><i class="fas fa-cog fa-spin me-1"></i> 自动流水线运行中...</span>';
+        
         chatInput.disabled = true;
         chatInput.placeholder = "⛔ 自动模式运行中 (AI 已锁定)";
         chatBtn.disabled = true;
-        chatBox.style.opacity = "0.5";
+        chatBox.style.opacity = "0.6";
         chatBox.style.pointerEvents = "none";
+        
         aiBadge.className = "badge bg-secondary";
         aiBadge.innerHTML = '<i class="fas fa-lock me-1"></i>AI 已锁定';
     } 
+    // --- 状态 B: 单次任务中 ---
     else if (mode === 'SINGLE_TASK') {
         btnMain.className = "btn btn-warning btn-lg w-100 mb-3 py-3 fw-bold shadow-sm text-dark";
         btnMain.innerHTML = '<i class="fas fa-hourglass-half me-2"></i> 任务执行中...';
         statusText.innerHTML = '<span class="text-warning"><i class="fas fa-robot me-1"></i> AI 正在执行单次指令...</span>';
+        
         chatInput.disabled = true;
         chatInput.placeholder = "⏳ 等待当前动作完成...";
         chatBtn.disabled = true;
-        chatBox.style.opacity = "0.8"; 
+        chatBox.style.opacity = "0.9"; 
+        
         aiBadge.className = "badge bg-success";
         aiBadge.innerHTML = '<i class="fas fa-check-circle me-1"></i>AI 执行中';
     }
+    // --- 状态 C: 空闲 ---
     else {
         btnMain.className = "btn btn-success btn-lg w-100 mb-3 py-3 fw-bold shadow-sm";
         btnMain.innerHTML = '<i class="fas fa-rocket me-2"></i> 启动自动分拣 (禁用 AI)';
         statusText.innerHTML = '<span class="text-success"><i class="fas fa-check-circle me-1"></i> AI 在线，可对话控制。</span>';
+        
         chatInput.disabled = false;
         chatInput.placeholder = "在此输入指令 (例如：把红色的放1号)...";
         chatBtn.disabled = false;
         chatBox.style.opacity = "1.0";
         chatBox.style.pointerEvents = "auto";
+        
         aiBadge.className = "badge bg-success";
         aiBadge.innerHTML = '<i class="fas fa-check-circle me-1"></i>AI 在线';
     }
@@ -90,31 +120,33 @@ function fetchStatus() {
             
             updateInventory(data.inventory);
             
-            // 🔥 核心修改：处理系统消息的合并逻辑
+            // 处理系统消息追加 + 打字机效果
             if (data.system_msg) {
                 if (activeAiBubble) {
-                    // 1. 如果有活跃的 AI 气泡，移除等待动画
                     const loader = activeAiBubble.querySelector('.typing-indicator');
                     if (loader) loader.remove();
 
-                    // 2. 追加系统消息（带分隔线）
-                    const sysDiv = document.createElement('div');
-                    sysDiv.className = "system-append-msg";
-                    sysDiv.innerHTML = data.system_msg;
-                    activeAiBubble.appendChild(sysDiv);
+                    const span = document.createElement('span');
+                    if (data.system_msg.includes('⚠️') || data.system_msg.includes('❌') || data.system_msg.includes('拒绝')) {
+                        span.className = "system-append-span error";
+                    } else {
+                        span.className = "system-append-span";
+                    }
                     
-                    // 3. 滚动到底部并重置活跃气泡
-                    const box = document.getElementById('chat-box');
-                    box.scrollTop = box.scrollHeight;
+                    span.innerHTML = " "; 
+                    activeAiBubble.appendChild(span);
+                    
+                    typeWriter(span, data.system_msg);
                     activeAiBubble = null; 
                 } else {
-                    // 兜底：如果没有活跃气泡，还是作为单独的一条发出
-                    appendChat("AI", data.system_msg, "ai");
+                    const bubble = appendChat("AI", "", "ai", false); 
+                    typeWriter(bubble, data.system_msg);
                 }
             }
 
             const badge = document.getElementById('sys-mode');
-            if (data.mode === 'AUTO') {
+            // 右上角的 Badge 也要同步处理
+            if (data.mode === 'AUTO' || data.mode === 'EXECUTING') {
                 badge.innerText = "自动运行";
                 badge.className = "badge bg-success";
             } else if (data.mode === 'SINGLE_TASK') {
@@ -124,6 +156,7 @@ function fetchStatus() {
                 badge.innerText = "系统空闲";
                 badge.className = "badge bg-warning text-dark";
             }
+            
             updateUIState(data.mode);
         }).catch(err => {});
 }
@@ -133,7 +166,6 @@ function sendChat() {
     const text = input.value.trim();
     if (!text) return;
 
-    // 用户发送消息时，把上一个活跃气泡关掉（防止错位）
     if (activeAiBubble) {
         const loader = activeAiBubble.querySelector('.typing-indicator');
         if (loader) loader.remove();
@@ -148,30 +180,31 @@ function sendChat() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text })
     }).then(res => res.json()).then(data => {
-        // AI 回复时，带上等待动画
-        const bubble = appendChat("AI", data.reply, "ai", true); // true 表示显示等待动画
-        
-        // 如果 AI 确实下发了指令，我们才等待系统消息
-        // 如果 AI 只是闲聊（没有 command），就不要保留 activeAiBubble
-        // 但这里前端不知道有没有 command，所以我们默认 AI 回复都可能是操作的前奏
-        // 优化：如果 data.reply 里包含 "无法" "拒绝" 等词，可能就没有后续了？
-        // 稳妥起见，我们总是标记它为活跃气泡，如果后续没有 system_msg，它就一直停在加载动画？
-        // 不，我们改一下：AI 只有下发了任务才会有后续。
-        // 但为了简单，我们让它显示动画。如果 3 秒内没收到系统消息，可以自动移除动画（可选优化）。
-        
+        const bubble = appendChat("AI", data.reply, "ai", true); 
         activeAiBubble = bubble;
     });
 }
 
-// 🔥 修改：增加 showLoading 参数
 function appendChat(sender, text, type, showLoading=false) {
     const box = document.getElementById('chat-box');
-    const div = document.createElement('div');
-    div.className = `chat-message msg ${type}`;
+    const row = document.createElement('div');
+    row.className = `chat-row ${type}`;
+
+    if (type !== 'system') {
+        const avatar = document.createElement('div');
+        avatar.className = `avatar ${type}`;
+        if (type === 'ai') {
+            avatar.innerHTML = '<i class="fas fa-robot"></i>';
+        } else {
+            avatar.innerHTML = '<i class="fas fa-user"></i>';
+        }
+        row.appendChild(avatar);
+    }
+
+    const bubble = document.createElement('div');
+    bubble.className = `chat-message ${type}`;
     
-    let content = type === 'system' ? text : `<strong>${sender}:</strong> ${text}`;
-    
-    // 添加动画 HTML
+    let content = text;
     if (showLoading) {
         content += `
         <div class="typing-indicator">
@@ -181,13 +214,13 @@ function appendChat(sender, text, type, showLoading=false) {
         </div>`;
     }
     
-    div.innerHTML = content;
-    box.appendChild(div);
+    bubble.innerHTML = content;
+    row.appendChild(bubble);
+    box.appendChild(row);
     box.scrollTop = box.scrollHeight;
-    return div; // 返回 DOM 元素以便后续操作
+    return bubble; 
 }
 
-// ... (其他函数保持不变) ...
 function initInventoryGrid() {
     const container = document.getElementById('inventory-grid');
     container.innerHTML = '';

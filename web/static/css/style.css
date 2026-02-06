@@ -1,185 +1,88 @@
-/* web/static/css/style.css */
-
 /* 全局设置 */
 body {
-    background-color: #f0f2f5; /* 更柔和的灰 */
+    background-color: #f0f2f5;
     font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
 }
 
 /* 导航栏 */
 .bg-dark-blue {
     background-color: #1a2332;
-    border-bottom: 3px solid #0dcaf0; /* 底部青色亮条 */
+    border-bottom: 3px solid #0dcaf0;
 }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background-color: #6c757d; }
+.status-dot.online { background-color: #00ff88; box-shadow: 0 0 5px #00ff88; }
 
-/* 状态指示灯 */
-.status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    display: inline-block;
-    background-color: #6c757d;
-}
-.status-dot.online {
-    background-color: #00ff88;
-    box-shadow: 0 0 5px #00ff88;
-}
+/* 监控与槽位 */
+.monitor-frame { background-color: #000; border-radius: 6px; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+.monitor-frame img { height: 100%; object-fit: contain; }
 
-/* 左侧监控区 */
-.monitor-frame {
-    background-color: #000;
-    overflow: hidden;
-    border-radius: 6px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-}
-.monitor-frame img {
-    height: 100%;
-    object-fit: contain;
-}
-
-/* 槽位格子 (更紧凑) */
-.slot-box {
-    background-color: #fff;
-    border: 1px solid #e9ecef;
-    border-radius: 4px;
-    height: 60px; /* 变矮一点 */
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0 15px;
-    transition: all 0.2s;
-}
-
-.slot-number {
-    font-weight: 700;
-    color: #ced4da;
-    font-size: 1.2rem;
-}
-
-.slot-status {
-    font-size: 0.7rem;
-    font-weight: 600;
-    padding: 2px 6px;
-    border-radius: 4px;
-    background-color: #e9ecef;
-    color: #6c757d;
-}
-
-/* 满载高亮 */
-.slot-full {
-    border-left: 4px solid #ffc107; /* 左侧橙色条 */
-    background-color: #fff;
-}
+.slot-box { background-color: #fff; border: 1px solid #e9ecef; border-radius: 4px; height: 60px; display: flex; justify-content: space-between; align-items: center; padding: 0 15px; transition: all 0.2s; }
+.slot-number { font-weight: 700; color: #ced4da; font-size: 1.2rem; }
+.slot-status { font-size: 0.7rem; font-weight: 600; padding: 2px 6px; border-radius: 4px; background-color: #e9ecef; color: #6c757d; }
+.slot-full { border-left: 4px solid #ffc107; background-color: #fff; }
 .slot-full .slot-number { color: #495057; }
-.slot-full .slot-status {
-    background-color: #ffc107;
-    color: #000;
-}
+.slot-full .slot-status { background-color: #ffc107; color: #000; }
 
-/* --- 右侧 AI 面板核心 --- */
+/* --- 聊天区域核心样式 --- */
 
-.ai-panel {
-    border-radius: 12px;
-    overflow: hidden;
-}
-
+.ai-panel { border-radius: 12px; overflow: hidden; }
 .chat-container {
     background-color: #f8f9fa;
-    /* 自定义滚动条 */
     scrollbar-width: thin;
     scrollbar-color: #dee2e6 #f8f9fa;
+    display: flex; flex-direction: column; gap: 15px; padding: 20px;
 }
 
-/* 聊天气泡 */
+/* 消息行 */
+.chat-row { display: flex; align-items: flex-start; gap: 10px; width: 100%; }
+.chat-row.user { flex-direction: row-reverse; }
+.chat-row.ai { flex-direction: row; }
+.chat-row.system { justify-content: center; }
+
+/* 头像 */
+.avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; justify-content: center; align-items: center; flex-shrink: 0; color: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+.avatar.ai { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+.avatar.user { background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%); }
+
+/* 气泡 */
 .chat-message {
-    margin-bottom: 16px;
-    padding: 10px 16px;  /* 稍微调小一点内边距，更精致 */
+    padding: 12px 16px;
     border-radius: 12px;
-    
-    /* 🔥 核心修改：让宽度自适应内容，不再是一长条 */
-    width: fit-content; 
-    max-width: 80%;      /* 最大不超过父容器的 80% */
-    
+    max-width: 75%;
     position: relative;
     box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-    line-height: 1.5;
-    
-    /* 防止长英文单词撑破布局 */
-    word-break: break-word; 
+    line-height: 1.6; /*稍微增加行高，阅读更舒适*/
+    word-break: break-word;
+    font-size: 0.95rem;
 }
+.chat-message.ai { background-color: #fff; border: 1px solid #e9ecef; border-top-left-radius: 2px; color: #333; }
+.chat-message.user { background-color: #0d6efd; color: white; border-top-right-radius: 2px; }
+.chat-message.system { background: none; box-shadow: none; font-size: 0.8rem; color: #adb5bd; text-align: center; padding: 0; max-width: 90%; }
 
-/* AI 气泡 */
-.msg.ai {
-    background-color: #fff;
-    border-top-left-radius: 2px; /* 左上角直角 */
-    color: #333;
-    
-    /* 靠左对齐 */
-    align-self: flex-start;
-    margin-right: auto; 
-    
-    border: 1px solid #e9ecef;
-}
-
-/* 用户气泡 */
-.msg.user {
-    background-color: #0d6efd; /* 蓝色 */
-    color: white;
-    border-top-right-radius: 2px; /* 右上角直角 */
-    
-    /* 靠右对齐 */
-    align-self: flex-end;
-    margin-left: auto; 
-}
-
-/* 系统消息 */
-.msg.system {
-    /* 系统消息需要特殊处理，让它居中 */
-    width: auto;         /* 或者是 fit-content */
-    max-width: 90%;
-    margin-left: auto;
-    margin-right: auto;
-    align-self: center;
-    
-    background: none;
-    box-shadow: none;
-    font-size: 0.85rem;
-    color: #6c757d;
-    text-align: center;
-    padding: 4px;
-}
-
-/* 等待动画：跳动的三个点 */
+/* 🔥 优化：等待动画 (跳动的点) */
 .typing-indicator {
-    display: inline-block;
-    margin-left: 5px;
+    display: inline-flex; /* 让它在行内显示 */
+    align-items: center;
+    margin-left: 4px;
+    vertical-align: middle;
+    height: 1em;
 }
-
 .typing-dot {
-    display: inline-block;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background-color: #6c757d;
+    width: 4px; height: 4px; border-radius: 50%; background-color: #888;
+    margin: 0 2px;
     animation: typing 1.4s infinite ease-in-out both;
-    margin: 0 1px;
 }
-
 .typing-dot:nth-child(1) { animation-delay: -0.32s; }
 .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+@keyframes typing { 0%, 80%, 100% { transform: scale(0); opacity: 0.5; } 40% { transform: scale(1); opacity: 1; } }
 
-@keyframes typing {
-    0%, 80%, 100% { transform: scale(0); }
-    40% { transform: scale(1); }
+/* 🔥 优化：追加的消息 (不再换行，而是自然衔接) */
+.system-append-span {
+    font-weight: 500;
+    color: #198754; /* 成功绿 */
+    margin-left: 5px; /* 与前面的文字空一格 */
 }
-
-/* 确保系统追加的消息和上一条有一定间距 */
-.system-append-msg {
-    display: block;
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px dashed #e9ecef;
-    color: #495057;
+/* 如果是报错消息，可以用红色 (JS控制类名即可，这里给个默认) */
+.system-append-span.error {
+    color: #dc3545;
 }
