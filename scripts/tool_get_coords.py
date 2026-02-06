@@ -1,3 +1,4 @@
+# scripts/tool_get_coords.py
 import sys
 import os
 import time

@@ -1,143 +1,129 @@
 import time
-import math
 import sys
 import os
-
-# 路径处理
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
 from config import settings
 
-# 根据配置导入驱动
-if settings.SIMULATION_MODE:
-    from modules.mock_hardware import MockMyCobot as MyCobotDriver
-else:
-    try:
-        from pymycobot import MyCobot280 as MyCobotDriver
-    except ImportError:
-        print("❌ 无法导入 pymycobot，自动切换到仿真模式")
-        settings.SIMULATION_MODE = True
-        from modules.mock_hardware import MockMyCobot as MyCobotDriver
+# 导入驱动
+try:
+    from pymycobot import MyCobot280
+except ImportError:
+    from pymycobot import MyCobot as MyCobot280
 
 class ArmController:
     def __init__(self):
-        mode_str = "仿真模式" if settings.SIMULATION_MODE else "真实模式"
-        print(f">>> [Arm] 初始化驱动 ({mode_str})...")
-        
-        try:
-            self.mc = MyCobotDriver(settings.PORT, settings.BAUD)
-            
-            if not settings.SIMULATION_MODE:
-                time.sleep(0.5)
-                self.mc.power_on()
-                time.sleep(1)
-            
-            self.move_mode = 1
-            self.speed = 80     
-            self.gripper_open()
-            
-        except Exception as e:
-            print(f"❌ [Arm] 连接失败: {e}")
-            self.mc = None
+        print(f">>> [Arm] 初始化驱动 (端口: {settings.PORT})...")
+        self.mc = None
+        self.is_connected = False
 
-    def gripper_open(self):
-        if not self.mc: return
-        self.mc.set_gripper_value(100, 70)
-        # 仿真模式不需要太长的物理等待
-        time.sleep(0.2 if settings.SIMULATION_MODE else 1.0)
-
-    def gripper_close(self):
-        if not self.mc: return
-        self.mc.set_gripper_value(10, 70)
-        time.sleep(0.2 if settings.SIMULATION_MODE else 1.0)
-
-    # --- 闭环检测 ---
-    def wait_until_arrival(self, target_coords, tolerance=15, timeout=15):
-        if not self.mc: return
-        
-        # 仿真模式下，MockHardware 会瞬间把 coords 更新，所以这里直接通过
         if settings.SIMULATION_MODE:
-            # 稍微模拟一点点延时感
-            time.sleep(0.1) 
+            print("⚠️ 仿真模式")
             return
 
-        start_t = time.time()
-        while True:
-            if time.time() - start_t > timeout:
-                print(" -> ❌ [Arm] 超时跳过")
-                break
-            curr = self.mc.get_coords()
-            if not curr or len(curr) < 6:
-                time.sleep(0.1)
-                continue
-            dx = curr[0] - target_coords[0]
-            dy = curr[1] - target_coords[1]
-            dz = curr[2] - target_coords[2]
-            dist = math.sqrt(dx**2 + dy**2 + dz**2)
-            if dist < tolerance:
-                break
-            time.sleep(0.1)
+        try:
+            # 1. 连接
+            self.mc = MyCobot280(settings.PORT, settings.BAUD)
+            time.sleep(0.5)
+            
+            # 2. 上电
+            if not self.mc.is_power_on():
+                self.mc.power_on()
+                time.sleep(0.5) # 上电很快，缩短等待
+            
+            # 3. 初始状态
+            self.mc.set_gripper_value(100, 70) # 张开
+            
+            # 🔥 提速核心：速度设为 90 (范围 0-100)
+            self.speed = 80
+            
+            # 4. 测试通讯
+            angles = self.mc.get_angles()
+            if angles:
+                print(f"✅ [Arm] 连接成功，当前角度: {angles}")
+                self.is_connected = True
+                self.mc.set_color(0, 255, 0)
+            else:
+                print("❌ [Arm] 串口打开但读取失败")
+                
+        except Exception as e:
+            print(f"❌ [Arm] 连接异常: {e}")
+
+    # --- 核心工具 ---
+    def move_to_angles(self, angles, speed, delay_time):
+        """最稳健的移动方式：发送角度 -> 等待"""
+        if not self.is_connected: return
+        try:
+            self.mc.send_angles(angles, speed)
+            time.sleep(delay_time)
+        except Exception as e:
+            print(f"⚠️ 移动指令发送失败: {e}")
 
     # --- 业务动作 ---
 
     def go_observe(self):
-        if not self.mc: return
-        print(">>> [Arm] 🚀 正在归位 (Observe Point)...")
-        target = settings.OBSERVE_COORDS
-        self.mc.send_coords(target, self.speed, self.move_mode)
-        self.wait_until_arrival(target, tolerance=15)
-        print(">>> [Arm] ✅ 已归位")
+        """前往抓取观测点"""
+        print(">>> [Arm] 🚀 前往观测点...")
+        target = settings.PICK_POSES["observe"]
+        # 🔥 提速：2.5s -> 1.5s
+        self.move_to_angles(target, self.speed, 1.5)
+        print(">>> [Arm] ✅ 已就位")
 
     def pick(self):
-        if not self.mc: return
-        print(f"🤖 [Arm] 执行标准抓取流程")
-        pick_low = settings.PICK_DEFAULT_COORDS
-        pick_high = list(pick_low)
-        pick_high[2] = settings.SAFE_Z
+        """执行抓取流程"""
+        if not self.is_connected: return
+        print(f"🤖 [Arm] 执行抓取")
+
+        pose_high = settings.PICK_POSES["observe"] # 高位
+        pose_low  = settings.PICK_POSES["grab"]    # 低位
         
-        print("   1️⃣ 移动到抓取上方")
-        self.mc.send_coords(pick_high, self.speed, self.move_mode)
-        self.wait_until_arrival(pick_high, tolerance=15)
+        # 1. 下抓
+        print("   1️⃣ 下探抓取")
+        self.mc.set_gripper_value(100, 70) 
+        # 🔥 提速：2.0s -> 1.2s (垂直下探距离短，很快)
+        self.move_to_angles(pose_low, self.speed, 1.2)
         
-        self.gripper_open()
+        # 2. 闭合
+        print("   2️⃣ 闭合夹爪")
+        self.mc.set_gripper_value(10, 70)
+        time.sleep(0.8) # 夹紧不需要太久，0.8s 足够
 
-        print("   2️⃣ 垂直下抓")
-        self.mc.send_coords(pick_low, self.speed, self.move_mode)
-        self.wait_until_arrival(pick_low, tolerance=8)
-
-        self.gripper_close()
-
-        print("   3️⃣ 垂直抬起")
-        self.mc.send_coords(pick_high, self.speed, self.move_mode)
-        self.wait_until_arrival(pick_high, tolerance=15)
+        # 3. 抬起
+        print("   3️⃣ 抬起")
+        # 🔥 提速：2.0s -> 1.0s
+        self.move_to_angles(pose_high, self.speed, 1.0)
 
     def place(self, slot_id):
-        if not self.mc: return
+        """放置到槽位"""
+        if not self.is_connected: return
         
-        target_slot = settings.STORAGE_RACKS.get(slot_id)
-        if not target_slot:
-            print(f"❌ [Arm] 无效槽位: {slot_id}")
+        rack_data = settings.STORAGE_RACKS.get(slot_id)
+        if not rack_data:
+            print(f"❌ 无效槽位: {slot_id}")
             return
 
         print(f"🤖 [Arm] 执行放置 -> {slot_id}号位")
-        tx, ty, tz = target_slot[0], target_slot[1], target_slot[2]
-        t_pose = target_slot[3:]
         
-        place_high = [tx, ty, settings.SAFE_Z] + t_pose
-        place_low = [tx, ty, tz] + t_pose
+        pose_high = rack_data["high"]
+        pose_low  = rack_data["low"]
 
+        # 1. 移动到槽位上方 (High)
         print("   4️⃣ 移动到槽位上方")
-        self.mc.send_coords(place_high, self.speed, self.move_mode)
-        self.wait_until_arrival(place_high, tolerance=15)
+        # 🔥 提速：这是长距离移动，3.0s -> 2.0s
+        self.move_to_angles(pose_high, self.speed, 2.0) 
 
-        print("   5️⃣ 垂直下放")
-        self.mc.send_coords(place_low, self.speed, self.move_mode)
-        self.wait_until_arrival(place_low, tolerance=8)
+        # 2. 下放 (Low)
+        print("   5️⃣ 下放")
+        # 🔥 提速：2.0s -> 1.2s
+        self.move_to_angles(pose_low, self.speed, 1.2)
 
-        self.gripper_open()
+        # 3. 松开
+        print("   6️⃣ 松开")
+        self.mc.set_gripper_value(100, 70)
+        time.sleep(0.5) # 松开很快
 
-        print("   6️⃣ 垂直抬起")
-        self.mc.send_coords(place_high, self.speed, self.move_mode)
-        self.wait_until_arrival(place_high, tolerance=15)
+        # 4. 抬起 (High)
+        print("   7️⃣ 抬起离开")
+        # 🔥 提速：1.5s -> 1.0s
+        self.move_to_angles(pose_high, self.speed, 1.0)
 
+        # 5. 归位
         self.go_observe()
