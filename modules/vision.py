@@ -2,14 +2,6 @@ import cv2
 import numpy as np
 import json
 import os
-import sys
-
-# 尝试导入 Aruco 库
-try:
-    from cv2 import aruco
-except ImportError:
-    print("⚠️ 警告: 未找到 cv2.aruco 模块，请运行 'pip install opencv-contrib-python' 安装")
-    aruco = None
 
 class VisionSystem:
     def __init__(self, config_dir="config"):
@@ -17,7 +9,7 @@ class VisionSystem:
         self.base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         self.config_dir = os.path.join(self.base_dir, config_dir)
         
-        # 2. 加载相机内参
+        # 2. 加载相机内参 (保留，用于去畸变)
         matrix_path = os.path.join(self.config_dir, "camera_matrix.npz")
         if os.path.exists(matrix_path):
             data = np.load(matrix_path)
@@ -29,22 +21,40 @@ class VisionSystem:
             self.mtx = None
             self.dist = None
 
-        # 3. 加载手眼标定参数
-        hand_eye_path = os.path.join(self.config_dir, "calibration.json")
-        if os.path.exists(hand_eye_path):
-            with open(hand_eye_path, 'r') as f:
-                self.calib_data = json.load(f)
-            self.scale = self.calib_data.get("scale_mm_per_pixel", 0)
-            self.offset = self.calib_data.get("camera_gripper_offset", [0, 0])
-            print(f"✅ [Vision] 手眼标定参数已加载: 1px={self.scale:.4f}mm")
+        # 3. 🔥 加载 ROI 配置文件 (你刚刚生成的那个文件)
+        vision_config_path = os.path.join(self.config_dir, "vision_config.json")
+        self.roi = None
+        if os.path.exists(vision_config_path):
+            with open(vision_config_path, 'r') as f:
+                data = json.load(f)
+                self.roi = data.get("roi") # [x, y, w, h]
+                print(f"✅ [Vision] ROI 区域已加载: {self.roi}")
         else:
-            print("⚠️ [Vision] 未找到手眼标定文件")
-            self.scale = 0
-            self.offset = [0, 0]
+            print("⚠️ [Vision] 未找到 vision_config.json，请先运行 calibrate_vision.py")
+
+        # 4. 🔥 定义颜色阈值 (在这里定义黄色)
+        # 格式: [Lower HSV, Upper HSV]
+        self.colors = {
+            'red': [
+                (np.array([0, 120, 70]), np.array([10, 255, 255])),
+                (np.array([170, 120, 70]), np.array([180, 255, 255]))
+            ],
+            'blue': [
+                (np.array([100, 150, 0]), np.array([140, 255, 255]))
+            ],
+            # 黄色通常在 20-35 之间
+            'yellow': [
+                (np.array([20, 100, 100]), np.array([35, 255, 255]))
+            ]
+        }
 
     def process_frame(self, frame):
         """
-        主处理流程：去畸变 -> 找最近物体 -> 返回坐标
+        新版处理流程：
+        1. 去畸变
+        2. 画出 ROI 框 (给人类看)
+        3. 裁切 ROI 区域
+        4. 分析颜色
         """
         # 1. 去畸变
         if self.mtx is not None:
@@ -53,84 +63,67 @@ class VisionSystem:
             dst = cv2.undistort(frame, self.mtx, self.dist, None, newcameramtx)
             frame = dst
 
-        # 2. 寻找最靠前的物体 (The Nearest Object)
-        target_center = self.find_nearest_object(frame)
+        # 结果容器
+        result = {
+            "detected": False,
+            "color": "unknown",
+            "offset": (0, 0) # 兼容旧接口，虽然现在不需要了
+        }
+
+        # 2. 如果没有 ROI，直接返回
+        if not self.roi:
+            cv2.putText(frame, "NO CONFIG", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            return frame, None
+
+        # 3. 绘制 ROI 框 (绿色矩形)，方便调试
+        x, y, w, h = self.roi
+        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+        cv2.putText(frame, "Detection Zone", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
+        # 4. 🔥 核心逻辑：裁切 + 颜色分析
+        roi_img = frame[y:y+h, x:x+w]
+        hsv_roi = cv2.cvtColor(roi_img, cv2.COLOR_BGR2HSV)
         
-        real_world_offset = None
-        if target_center:
-            # 画出红点
-            cv2.circle(frame, target_center, 8, (0, 0, 255), -1)
-            cv2.putText(frame, "TARGET", (target_center[0]+10, target_center[1]), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-            
-            # 3. 计算物理偏差
-            h, w = frame.shape[:2]
-            center_x, center_y = w // 2, h // 2
-            
-            dx_pixel = target_center[0] - center_x
-            dy_pixel = target_center[1] - center_y
-            
-            # 转换为毫米 (注意：正负号根据之前的 test_moves.py 测试结果调整)
-            # 假设之前测试是 X反向, Y反向
-            dx_mm = -dx_pixel * self.scale
-            dy_mm = -dy_pixel * self.scale
-            
-            real_world_offset = (dx_mm, dy_mm)
-            
-            # 显示信息
-            text = f"Offset: X={dx_mm:.1f}, Y={dy_mm:.1f}"
-            cv2.putText(frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        detected_color = None
+        max_pixels = 0
+        total_pixels = w * h
+        threshold = total_pixels * 0.05 # 必须占满 ROI 的 5% 才算有效
 
-        return frame, real_world_offset
-
-    def find_nearest_object(self, img):
-        """
-        寻找画面中 Y 坐标最大 (最靠下/最靠前) 的物体
-        """
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-        _, thresh = cv2.threshold(blurred, 80, 255, cv2.THRESH_BINARY_INV)
-        
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        valid_objects = []
-        for c in contours:
-            area = cv2.contourArea(c)
-            if area > 1000:
-                M = cv2.moments(c)
-                if M["m00"] != 0:
-                    cX = int(M["m10"] / M["m00"])
-                    cY = int(M["m01"] / M["m00"])
-                    valid_objects.append((cY, (cX, cY)))
-        
-        if valid_objects:
-            valid_objects.sort(key=lambda x: x[0], reverse=True)
-            return valid_objects[0][1]
-        return None
-
-    def detect_aruco_marker(self, frame):
-        """
-        🔥 修复版：兼容新旧 OpenCV 版本的 Aruco 检测
-        """
-        if aruco is None:
-            return []
-
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
-        parameters = aruco.DetectorParameters()
-
-        # --- 兼容性修复 ---
-        try:
-            # 尝试使用新版 API (OpenCV 4.7+)
-            detector = aruco.ArucoDetector(aruco_dict, parameters)
-            corners, ids, rejected = detector.detectMarkers(gray)
-        except AttributeError:
-            # 回退到旧版 API (OpenCV < 4.7)
-            corners, ids, rejected = aruco.detectMarkers(gray, aruco_dict, parameters=parameters)
-
-        detected_ids = []
-        if ids is not None:
-            detected_ids = ids.flatten().tolist()
-            aruco.drawDetectedMarkers(frame, corners, ids)
+        # 遍历所有定义的颜色 (红、蓝、黄)
+        for color_name, ranges in self.colors.items():
+            mask = np.zeros(hsv_roi.shape[:2], dtype="uint8")
             
-        return detected_ids
+            # 处理颜色范围 (有的颜色像红色有两个区间，需要合并)
+            if isinstance(ranges[0], tuple): 
+                # 只有单个区间的 (如蓝、黄) - 这里的结构适配稍微调整一下以防万一
+                # 上面的定义里 blue 和 yellow 我用的是 list 包裹 tuple，逻辑统一如下：
+                 for (lower, upper) in ranges:
+                    mask += cv2.inRange(hsv_roi, lower, upper)
+            else:
+                # 兼容旧写法
+                 mask = cv2.inRange(hsv_roi, ranges[0], ranges[1])
+
+            # 统计像素
+            count = cv2.countNonZero(mask)
+            
+            # 找出像素最多的那个颜色
+            if count > threshold and count > max_pixels:
+                max_pixels = count
+                detected_color = color_name
+
+        # 5. 更新结果
+        if detected_color:
+            result["detected"] = True
+            result["color"] = detected_color
+            
+            # 在画面上显示结果
+            text = f"Color: {detected_color.upper()}"
+            cv2.putText(frame, text, (x, y + h + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+            
+            # 画一个实心圆点表示识别到了
+            cv2.circle(frame, (x + w//2, y + h//2), 10, (0, 255, 255), -1)
+
+        # process_frame 约定返回 (处理后的图片, 结果数据)
+        # 注意：这里第二个返回值改成了字典 result，而不是以前的 offset
+        # 我们需要在 main.py 里适配这个变化
+        return frame, result

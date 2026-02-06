@@ -29,8 +29,6 @@ state = SystemState()
 def perform_pick_and_place(arm, target_slot, active_mode="SINGLE_TASK", restore_mode="IDLE"):
     """
     工作线程：执行一次抓取放置
-    active_mode: 执行过程中系统显示的状态
-    restore_mode: 任务结束后系统应该恢复的模式
     """
     try:
         # 再次确认锁定状态
@@ -38,7 +36,7 @@ def perform_pick_and_place(arm, target_slot, active_mode="SINGLE_TASK", restore_
         
         arm.pick()
         
-        # 安全检查：如果在抓取过程中用户点了暂停 (mode 被改成了 IDLE)
+        # 安全检查
         if state.mode == "IDLE" and restore_mode == "AUTO":
             print(">>> [System] 检测到暂停信号，任务完成后将停止")
             restore_mode = "IDLE"
@@ -57,8 +55,6 @@ def perform_pick_and_place(arm, target_slot, active_mode="SINGLE_TASK", restore_
         restore_mode = "IDLE" 
     
     finally:
-        # 任务结束，恢复状态
-        # 只有当前没被强制打断时(状态依然是 active_mode)，才恢复到 restore_mode
         if state.mode == active_mode:
             state.mode = restore_mode
             print(f">>> [System] 任务结束，模式切换为: {state.mode}")
@@ -107,7 +103,8 @@ def main():
                 time.sleep(0.1)
                 continue
             
-            processed_frame, offset = vision.process_frame(frame)
+            # 🔥 修改 1: 适配新的 process_frame 返回值 (frame, result_dict)
+            processed_frame, vision_data = vision.process_frame(frame)
             
             # --- 处理 Web/AI 指令 ---
             if state.pending_ai_cmd:
@@ -177,7 +174,6 @@ def main():
                             state.system_msg = err_msg
                         else:
                             print(f"🤖 [AI] 触发单次分拣 -> {slot_id}号")
-                            # 立即锁住状态
                             state.mode = "SINGLE_TASK"
                             t = threading.Thread(target=perform_pick_and_place, args=(arm, slot_id, "SINGLE_TASK", "IDLE"))
                             t.start()
@@ -188,25 +184,30 @@ def main():
 
             web_server.update_frame(processed_frame)
 
-            # --- 自动模式循环 (🔥 Bug 修复核心区) ---
+            # --- 自动模式循环 ---
             fake_detect = (settings.SIMULATION_MODE and False)
             
-            # 只有 state.mode == "AUTO" 才能进这里。
-            # 一旦进入，必须立刻切走状态，防止下一轮循环重复进来。
-            if state.mode == "AUTO" and (offset or fake_detect):
+            # 🔥 修改 2: 提取视觉检测结果
+            is_detected = False
+            detected_color = "unknown"
+            
+            if vision_data and vision_data.get("detected"):
+                is_detected = True
+                detected_color = vision_data.get("color", "unknown")
+
+            # 🔥 修改 3: 使用 is_detected 作为触发条件
+            if state.mode == "AUTO" and (is_detected or fake_detect):
+                
+                # 目前逻辑：只要看到东西，就找第一个空位放进去（暂不区分颜色）
                 target_slot = get_first_empty_slot()
+                
                 if target_slot:
-                    print(f"🤖 [Auto] 触发分拣 -> {target_slot}号")
+                    print(f"🤖 [Auto] 视觉检测到: [{detected_color}], 触发分拣 -> {target_slot}号")
                     
-                    # 🔥 修复关键 1: 主线程立即上锁！把状态改为 EXECUTING
-                    # 这样下一轮 while True 循环时，state.mode 就不再是 "AUTO"，就不会再创建新线程了
                     state.mode = "EXECUTING"
-                    
-                    # 🔥 修复关键 2: 告诉线程，你现在的状态是 EXECUTING，做完后帮我改回 AUTO
                     t = threading.Thread(target=perform_pick_and_place, args=(arm, target_slot, "EXECUTING", "AUTO"))
                     t.start()
                     
-                    # 这里的 sleep 只是为了让视觉缓一缓，不再承担阻塞逻辑的作用
                     time.sleep(0.5) 
                 else:
                     print("⚠️ 仓库已满，自动暂停")
