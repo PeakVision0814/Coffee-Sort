@@ -166,9 +166,9 @@ async function sendChat() {
     appendChat("我", text, "user");
     input.value = '';
 
-    // 2. 创建一个空的 AI 气泡，准备接收流
-    const aiBubble = appendChat("AI", "", "ai", true); // true 显示 loading
-    activeAiBubble = aiBubble; // 暂存引用
+    // 2. 创建一个空的 AI 气泡
+    const aiBubble = appendChat("AI", "", "ai", true); 
+    activeAiBubble = aiBubble; 
     const loader = aiBubble.querySelector('.typing-indicator');
 
     try {
@@ -178,7 +178,6 @@ async function sendChat() {
             body: JSON.stringify({ message: text })
         });
 
-        // 3. 准备流式读取
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let isFirstChunk = true;
@@ -187,20 +186,20 @@ async function sendChat() {
             const { done, value } = await reader.read();
             if (done) break;
 
-            // 收到第一个字符时，移除 loading 动画
             if (isFirstChunk) {
                 if (loader) loader.remove();
                 isFirstChunk = false;
             }
 
-            // 解码并追加文本
             const chunk = decoder.decode(value, { stream: true });
-            aiBubble.innerHTML += chunk; // 直接追加内容
+            aiBubble.innerHTML += chunk; 
             
             // 自动滚动到底部
             const box = document.getElementById('chat-box');
             box.scrollTop = box.scrollHeight;
         }
+        
+        // ❌ 这里删掉了 speakText()，只显示文字
 
     } catch (err) {
         aiBubble.innerHTML += "<br>[连接断开]";
@@ -328,3 +327,100 @@ function saveSettings() {
     });
 }
 function sendHeartbeat() { fetch('/heartbeat', { method: 'POST' }).catch(e => {}); }
+
+// ==========================================
+// 🎤 仅语音识别 (Web Speech API) 
+// ==========================================
+
+let recognition = null;
+let isRecording = false;
+
+// 初始化语音识别
+function initSpeech() {
+    // 兼容性检查
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+        console.warn("当前浏览器不支持 Web Speech API");
+        const btn = document.getElementById('btn-mic');
+        if(btn) btn.style.display = 'none';
+        return;
+    }
+    
+    recognition = new SpeechRecognition();
+    recognition.continuous = false; // 说完一句自动停止
+    recognition.interimResults = true; // 显示临时结果
+    recognition.lang = 'zh-CN'; // 中文
+
+    recognition.onstart = function() {
+        isRecording = true;
+        const btn = document.getElementById('btn-mic');
+        if(btn) {
+            btn.classList.add('btn-danger', 'text-white');
+            btn.classList.remove('btn-outline-secondary');
+        }
+        const status = document.getElementById('voice-status');
+        if(status) status.innerText = "🎤 正在聆听... (请说话)";
+    };
+
+    recognition.onend = function() {
+        isRecording = false;
+        const btn = document.getElementById('btn-mic');
+        if(btn) {
+            btn.classList.remove('btn-danger', 'text-white');
+            btn.classList.add('btn-outline-secondary');
+        }
+        const status = document.getElementById('voice-status');
+        if(status) status.innerText = "";
+        
+        // 语音结束后，如果输入框有内容，自动发送
+        const input = document.getElementById('user-input');
+        if (input && input.value.trim().length > 0) {
+            sendChat(); 
+        }
+    };
+
+    recognition.onresult = function(event) {
+        let interimTranscript = '';
+        let finalTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+                finalTranscript += event.results[i][0].transcript;
+            } else {
+                interimTranscript += event.results[i][0].transcript;
+            }
+        }
+        
+        const input = document.getElementById('user-input');
+        if (input) {
+            if (finalTranscript) {
+                input.value = finalTranscript;
+            } else {
+                input.placeholder = interimTranscript; 
+            }
+        }
+    };
+    
+    recognition.onerror = function(event) {
+        console.error("语音识别错误:", event.error);
+        const status = document.getElementById('voice-status');
+        if(status) status.innerText = "❌ 识别错误: " + event.error;
+    };
+}
+
+// 切换录音状态
+function toggleSpeechRecognition() {
+    if (!recognition) initSpeech();
+    if (!recognition) return;
+
+    if (isRecording) {
+        recognition.stop();
+    } else {
+        recognition.start();
+    }
+}
+
+// 初始化
+document.addEventListener('DOMContentLoaded', function() {
+    initSpeech();
+});

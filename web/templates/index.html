@@ -53,10 +53,16 @@
                     <div class="input-group input-group-lg">
                         <input type="text" id="user-input" class="form-control ps-3" 
                             placeholder="在此输入指令..." onkeypress="handleEnter(event)">
+                        
+                        <button class="btn btn-outline-secondary" type="button" id="btn-mic" onclick="toggleSpeechRecognition()" title="按住说话">
+                            <i class="fas fa-microphone"></i>
+                        </button>
+                
                         <button class="btn btn-primary px-4" id="btn-send" onclick="sendChat()">
                             发送 <i class="fas fa-paper-plane ms-2"></i>
                         </button>
                     </div>
+                    <div class="form-text mt-1 ps-2" id="voice-status" style="height: 20px; color: #888; font-size: 0.85rem;"></div>
                 </div>
             </div>
         </div>
