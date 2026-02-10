@@ -145,7 +145,7 @@ function fetchStatus() {
         }).catch(err => {});
 }
 
-function sendChat() {
+async function sendChat() {
     if (isSystemBusy()) {
         sendCommand('stop');
         return;
@@ -155,23 +155,58 @@ function sendChat() {
     const text = input.value.trim();
     if (!text) return;
 
+    // 清理之前的 loading
     if (activeAiBubble) {
         const loader = activeAiBubble.querySelector('.typing-indicator');
         if (loader) loader.remove();
         activeAiBubble = null;
     }
 
+    // 1. 显示用户消息
     appendChat("我", text, "user");
     input.value = '';
 
-    fetch('/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text })
-    }).then(res => res.json()).then(data => {
-        const bubble = appendChat("AI", data.reply, "ai", true); 
-        activeAiBubble = bubble;
-    });
+    // 2. 创建一个空的 AI 气泡，准备接收流
+    const aiBubble = appendChat("AI", "", "ai", true); // true 显示 loading
+    activeAiBubble = aiBubble; // 暂存引用
+    const loader = aiBubble.querySelector('.typing-indicator');
+
+    try {
+        const response = await fetch('/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text })
+        });
+
+        // 3. 准备流式读取
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let isFirstChunk = true;
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            // 收到第一个字符时，移除 loading 动画
+            if (isFirstChunk) {
+                if (loader) loader.remove();
+                isFirstChunk = false;
+            }
+
+            // 解码并追加文本
+            const chunk = decoder.decode(value, { stream: true });
+            aiBubble.innerHTML += chunk; // 直接追加内容
+            
+            // 自动滚动到底部
+            const box = document.getElementById('chat-box');
+            box.scrollTop = box.scrollHeight;
+        }
+
+    } catch (err) {
+        aiBubble.innerHTML += "<br>[连接断开]";
+    } finally {
+        activeAiBubble = null;
+    }
 }
 
 function appendChat(sender, text, type, showLoading=false) {
@@ -246,7 +281,50 @@ function sendCommand(action) {
         body: JSON.stringify({ action: action })
     }).then(res => res.json()).then(data => {});
 }
-// Settings functions omitted for brevity but should be kept if needed
-function openSettings() { fetch('/api/settings').then(res => res.json()).then(data => { settingsModal.show(); }); }
-function saveSettings() { settingsModal.hide(); } 
+// 设置相关函数保持不变
+function openSettings() {
+    fetch('/api/settings').then(res => res.json()).then(data => {
+        const provider = data.provider || 'deepseek';
+        document.getElementById('cfg-provider').value = provider;
+        document.getElementById('cfg-api-key').value = data.api_key || '';
+        document.getElementById('cfg-base-url').value = data.base_url || '';
+        document.getElementById('cfg-model').value = data.model_name || '';
+        document.getElementById('cfg-prompt').value = data.system_prompt || '';
+        document.getElementById('cfg-api-key').type = "password";
+        settingsModal.show();
+    });
+}
+function updateBaseUrl() {
+    const provider = document.getElementById('cfg-provider').value;
+    const defaults = PROVIDER_DEFAULTS[provider];
+    if (defaults) {
+        document.getElementById('cfg-base-url').value = defaults.url;
+        if (provider !== 'other') document.getElementById('cfg-model').value = defaults.model;
+        document.getElementById('url-hint').innerText = provider === 'other' ? "请输入自定义地址" : `已自动载入 ${provider} 地址`;
+    }
+}
+function toggleKeyVisibility() {
+    const input = document.getElementById('cfg-api-key');
+    input.type = input.type === "password" ? "text" : "password";
+}
+function saveSettings() {
+    const newConfig = {
+        provider: document.getElementById('cfg-provider').value,
+        api_key: document.getElementById('cfg-api-key').value,
+        base_url: document.getElementById('cfg-base-url').value,
+        model_name: document.getElementById('cfg-model').value,
+        system_prompt: document.getElementById('cfg-prompt').value
+    };
+    fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newConfig)
+    }).then(res => res.json()).then(data => {
+        if (data.status === 'success') {
+            alert("✅ 配置已保存！");
+            settingsModal.hide();
+            refreshModelDisplay();
+        } else alert("❌ 保存失败");
+    });
+}
 function sendHeartbeat() { fetch('/heartbeat', { method: 'POST' }).catch(e => {}); }

@@ -1,5 +1,6 @@
+# modules/web_server.py
 import os
-from flask import Flask, render_template, Response, request, jsonify
+from flask import Flask, render_template, Response, request, jsonify, stream_with_context
 import cv2
 import threading
 import json
@@ -39,45 +40,61 @@ def heartbeat():
     if system_state: system_state.last_heartbeat = time.time()
     return jsonify("ok")
 
-@app.route('/api/settings', methods=['GET'])
-def get_settings():
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        return jsonify(data)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+@app.route('/api/settings', methods=['GET', 'POST'])
+def handle_settings():
+    if request.method == 'GET':
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return jsonify(data)
+        except: return jsonify({})
+    else:
+        try:
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(request.json, f, indent=4, ensure_ascii=False)
+            return jsonify({"status": "success"})
+        except Exception as e:
+            return jsonify({"status": "error", "msg": str(e)}), 500
 
-@app.route('/api/settings', methods=['POST'])
-def save_settings():
-    new_config = request.json
-    try:
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(new_config, f, indent=4, ensure_ascii=False)
-        return jsonify({"status": "success"})
-    except Exception as e:
-        return jsonify({"status": "error", "msg": str(e)}), 500
-
+# 🔥 核心修改：流式聊天接口
 @app.route('/chat', methods=['POST'])
 def chat():
-    # 🔥 允许 IDLE 和 SINGLE_TASK (AI触发的任务) 接收指令，只有 AUTO 模式拒绝
+    # 1. 检查状态
     if system_state and system_state.mode == "AUTO":
-        return jsonify({"reply": "⛔ 自动流水线运行中，AI 已锁定。"})
+        return Response("⛔ 自动流水线运行中，AI 已锁定。", mimetype='text/plain')
 
     data = request.json
     user_text = data.get('message', '')
-    if not user_text: return jsonify({"reply": "请输入指令"})
+    if not user_text: return Response("请输入指令", mimetype='text/plain')
 
-    if ai_module:
-        result = ai_module.process_text(user_text)
-    else:
-        result = {"reply": "AI模块未连接", "command": None}
-    
-    if result.get('command') and system_state:
-        print(f"⚡ [Web] 注入指令: {result['command']}")
-        system_state.pending_ai_cmd = result['command']
-    
-    return jsonify({"reply": result.get('reply', 'AI无回复')})
+    # 2. 定义生成器函数
+    def generate():
+        full_response_buffer = ""
+        
+        # 1. 获取当前库存作为上下文
+        current_inventory = system_state.inventory if system_state else None
+        
+        if ai_module:
+            # 获取 AI 的流式生成器
+            stream = ai_module.process_text_stream(user_text, inventory=current_inventory)
+            
+            # 🔥 核心修复：一边收，一边发！
+            for chunk in stream:
+                full_response_buffer += chunk # 后台偷偷记下来
+                yield chunk                   # 立刻发给前端 (实现打字机效果)
+            
+            # 2. 流结束后，后台提取指令 (用户看不见这步)
+            if system_state:
+                # 这里的 extract_command 需要足够强大，能从一堆文本里抠出 JSON
+                cmd = ai_module.extract_command(full_response_buffer)
+                if cmd:
+                    print(f"⚡ [Web] 识别到指令: {cmd}")
+                    system_state.pending_ai_cmd = cmd
+        else:
+            yield "❌ AI 模块未连接"
+
+    # 返回流式响应
+    return Response(stream_with_context(generate()), mimetype='text/plain')
 
 @app.route('/command', methods=['POST'])
 def command():
@@ -85,14 +102,16 @@ def command():
     action = request.json.get('action')
     print(f"🔘 [Web] 按钮点击: {action}")
     
-    if action == 'start': system_state.mode = "AUTO"
-    elif action == 'stop': system_state.mode = "IDLE"
+    if action == 'start':
+        system_state.pending_ai_cmd = {"type": "sys", "action": "start"}
+    elif action == 'stop':
+        system_state.pending_ai_cmd = {"type": "sys", "action": "stop"}
     elif action == 'scan':
         system_state.pending_ai_cmd = {"type": "sys", "action": "scan"}
     elif action == 'reset':
-        system_state.pending_ai_cmd = {"type": "arm", "action": "go_home"}
+        system_state.pending_ai_cmd = {"type": "sys", "action": "reset"}
     elif action == 'clear_all': 
-        system_state.inventory = {i: 0 for i in range(1, 7)}
+        system_state.pending_ai_cmd = {"type": "sys", "action": "clear_all"}
 
     return jsonify({"status": "ok"})
 
@@ -100,15 +119,14 @@ def command():
 def status():
     if not system_state: return jsonify({"inventory": {}, "mode": "OFFLINE"})
     
-    # 🔥 核心修改：取出 system_msg 并发送给前端，然后清空
     msg = system_state.system_msg
     if msg:
-        system_state.system_msg = None # 阅后即焚
+        system_state.system_msg = None 
 
     return jsonify({
         "inventory": system_state.inventory,
         "mode": system_state.mode,
-        "system_msg": msg # 将消息带给前端
+        "system_msg": msg
     })
 
 def start_flask(state_obj, ai_obj):

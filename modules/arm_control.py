@@ -27,12 +27,12 @@ class ArmController:
             # 2. 上电
             if not self.mc.is_power_on():
                 self.mc.power_on()
-                time.sleep(0.5) # 上电很快，缩短等待
+                time.sleep(0.5)
             
             # 3. 初始状态
             self.mc.set_gripper_value(100, 70) # 张开
             
-            # 🔥 提速核心：速度设为 90 (范围 0-100)
+            # 速度设置
             self.speed = 80
             
             # 4. 测试通讯
@@ -60,17 +60,35 @@ class ArmController:
     # --- 业务动作 ---
 
     def go_observe(self):
-        """前往抓取观测点"""
-        print(">>> [Arm] 🚀 前往观测点...")
-        target = settings.PICK_POSES["observe"]
-        # 🔥 提速：2.5s -> 1.5s
-        self.move_to_angles(target, self.speed, 1.5)
-        print(">>> [Arm] ✅ 已就位")
+        """
+        前往抓取观测点 (安全复位)
+        🔥 修复：增加强制上电逻辑，解决待机垂落后无法复位的问题
+        """
+        if not self.is_connected: return
+        
+        print(">>> [Arm] 🔄 正在唤醒并归位...")
+        try:
+            # 1. 强制上电 (Torque On)
+            # 防止机械臂因长时间待机掉电，或者此时正处于下垂状态
+            self.mc.power_on()
+            time.sleep(0.5) # 给一点时间充能锁死舵机
+            
+            # 2. 发送归位指令
+            target = settings.PICK_POSES["observe"]
+            # 稍微给多一点时间(2.0s)，因为如果从趴着的状态起来，路程较长
+            self.move_to_angles(target, self.speed, 2.0) 
+            
+            print(">>> [Arm] ✅ 已安全归位")
+        except Exception as e:
+            print(f"❌ 归位失败: {e}")
 
     def pick(self):
         """执行抓取流程"""
         if not self.is_connected: return
         print(f"🤖 [Arm] 执行抓取")
+
+        # 为了安全，抓取前其实也可以再次确保上电，但 go_observe 已经做了
+        # 这里保持高效，不再重复 power_on，除非发现经常抓取失败
 
         pose_high = settings.PICK_POSES["observe"] # 高位
         pose_low  = settings.PICK_POSES["grab"]    # 低位
@@ -78,17 +96,15 @@ class ArmController:
         # 1. 下抓
         print("   1️⃣ 下探抓取")
         self.mc.set_gripper_value(100, 70) 
-        # 🔥 提速：2.0s -> 1.2s (垂直下探距离短，很快)
         self.move_to_angles(pose_low, self.speed, 1.2)
         
         # 2. 闭合
         print("   2️⃣ 闭合夹爪")
         self.mc.set_gripper_value(10, 70)
-        time.sleep(0.8) # 夹紧不需要太久，0.8s 足够
+        time.sleep(0.8)
 
         # 3. 抬起
         print("   3️⃣ 抬起")
-        # 🔥 提速：2.0s -> 1.0s
         self.move_to_angles(pose_high, self.speed, 1.0)
 
     def place(self, slot_id):
@@ -107,22 +123,19 @@ class ArmController:
 
         # 1. 移动到槽位上方 (High)
         print("   4️⃣ 移动到槽位上方")
-        # 🔥 提速：这是长距离移动，3.0s -> 2.0s
         self.move_to_angles(pose_high, self.speed, 2.0) 
 
         # 2. 下放 (Low)
         print("   5️⃣ 下放")
-        # 🔥 提速：2.0s -> 1.2s
         self.move_to_angles(pose_low, self.speed, 1.2)
 
         # 3. 松开
         print("   6️⃣ 松开")
         self.mc.set_gripper_value(100, 70)
-        time.sleep(0.5) # 松开很快
+        time.sleep(0.5) 
 
         # 4. 抬起 (High)
         print("   7️⃣ 抬起离开")
-        # 🔥 提速：1.5s -> 1.0s
         self.move_to_angles(pose_high, self.speed, 1.0)
 
         # 5. 归位

@@ -128,15 +128,24 @@ def main():
 
                 if cmd_action == 'start':
                     if state.mode == "IDLE":
+                        # 🔥 修复：启动前强制先复位！
+                        # 只有当机械臂安全回到观测点后，才进入 AUTO 模式
+                        state.system_msg = "正在复位机械臂..."
+                        arm.go_observe()
+                        
                         state.mode = "AUTO"
                         state.current_task = None 
+                        state.system_msg = "流水线已启动，开始检测。"
+                        
                 elif cmd_action == 'stop':
                     state.mode = "IDLE"
                     state.current_task = None
+                    state.system_msg = "系统已停止。"
+                    
                 elif cmd_action == 'reset':
                     if state.mode in ["IDLE"]:
+                        # 这里的 arm.go_observe 现在已经包含了 power_on
                         arm.go_observe()
-                        # 🔥 修改：去掉 emoji
                         state.system_msg = "机械臂已复位。"
                     else:
                         state.system_msg = "作业中无法复位。"
@@ -163,8 +172,13 @@ def main():
                     target_color = cmd.get('color', 'any').lower()
                     
                     if target_slot and 1 <= target_slot <= 6:
+                        # 🔥 核心修改：双重检查库存状态
+                        # 即使 AI 发了指令，如果库存满了，这里坚决拦住
                         if state.inventory[target_slot] == 1:
-                            state.system_msg = f"⚠️ {target_slot}号位已满。"
+                            err_msg = f"⚠️ 拒绝执行：{target_slot}号位已满！"
+                            print(f"🛑 [System] {err_msg}")
+                            state.system_msg = err_msg
+                            # 不切换模式，直接结束本次指令处理
                         else:
                             state.current_task = {'slot': target_slot, 'color': target_color}
                             state.mode = "SORTING_TASK"
