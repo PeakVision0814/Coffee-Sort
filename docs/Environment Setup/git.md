@@ -33,52 +33,70 @@ Git 是目前世界上最先进的**分布式版本控制系统**。不同于传
 
 **步骤 1：许可协议 (Information)**
 
-![](img\ScreenShot_2026-02-05_140648_073.png)
+![Git许可协议](img/Git许可协议.png)
 
 * 直接点击 **Next**。
 
 **步骤 2：选择安装位置 (Select Destination Location)**
+
+![选择Git安装路径](img/选择Git安装路径.png)
 
 * 建议保持默认路径 `C:\Program Files\Git`。
 * *注意：工业软件路径建议避免中文名称。*
 
 **步骤 3：选择组件 (Select Components)**
 
+![选择Git安装组件](img/选择Git安装组件.png)
+
 * 保持默认勾选。
-* 建议勾选 **"On the Desktop"** (在桌面创建图标)，方便快速打开。
 
 **步骤 4：选择默认编辑器 (Choosing the default editor used by Git)**
 
+![选择Git默认编辑器](img/选择Git默认编辑器.png)
+
 * 默认通常是 Vim（操作难度极大）。
-* **强烈建议修改：** 如果电脑装有 Notepad++ 或 VS Code，请在下拉菜单中选择。如果没有，请选择 **Use Notepad as Git's default editor**（使用记事本），这对非专职程序员最友好。
+* **强烈建议修改：** 如果电脑装有VS Code，请在下拉菜单中选择使用VS Code作为默认编辑器。
 
 **步骤 5：调整初始分支名 (Adjusting the name of the initial branch in new repositories)**
+
+![调整Git初始分支名](img/调整Git初始分支名.png)
 
 * 选择第二个选项：**Override the default branch name for new repositories**。
 * 填入：`main`（这是目前国际通用的标准主分支名称）。
 
 **步骤 6：配置环境变量 (Adjusting your PATH environment)** —— **【关键步骤】**
 
+![配置Git环境变量](img/配置Git环境变量.png)
+
 * **必须选择中间项：** `Git from the command line and also from 3rd-party software`。
 * *解释：* 这允许你在 CMD、PowerShell 以及 VS Code 等第三方工业软件中直接调用 Git，而不必局限于 Git 专用的黑框框。
 
 **步骤 7：选择 SSH 可执行文件 (Choosing the SSH executable)**
 
+![选择SSH可执行文件](img/选择SSH可执行文件.png)
+
 * 保持默认：`Use bundled OpenSSH`。
 
 **步骤 8：配置行尾符号转换 (Configuring the line ending conversions)** —— **【关键步骤】**
+
+![配置行尾符号转换](img/配置行尾符号转换.png)
 
 * 选择第一项：`Checkout Windows-style, commit Unix-style line endings`。
 * *解释：* Windows 和 Linux/Unix 系统对“换行”的定义不同。此选项能自动处理这种差异，防止代码在不同系统间传输时出现格式错误。
 
 **步骤 9：配置终端模拟器 (Configuring the terminal emulator...)**
 
+![配置终端模拟器](img/配置终端模拟器.png)
+
 * 建议选择第一项：`Use MinTTY (the default terminal of MSYS2)`。
 * MinTTY 的界面操作体验优于 Windows 自带的 CMD。
+* 可按照自己的习惯进行选择。
 
 **步骤 10：后续选项**
 
 * 后续步骤（Git Credential Manager, File System Caching 等）全部保持**默认**，一路点击 **Next** 直到 **Install**。
+
+![Git安装进度条](img/Git安装进度条.png)
 
 ---
 
@@ -88,7 +106,9 @@ Git 是目前世界上最先进的**分布式版本控制系统**。不同于传
 
 **1. 打开终端**
 
-* 在桌面右键点击空白处，选择 `Open Git Bash here`（如果安装了）或者直接打开 CMD。
+* 在桌面右键点击空白处，选择 `Open Git Bash here`（如果安装了）或者直接打开 CMD，使用命令`git --version`查看当前环境变量下Git是否配置完成。
+
+![检查Git环境变量](img/检查Git环境变量.png)
 
 **2. 配置用户信息（必做）**
 在命令行中依次输入以下两条命令（注意空格，可以将引号内的内容替换为实际信息）：

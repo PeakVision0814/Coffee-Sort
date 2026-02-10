@@ -13,7 +13,7 @@ except ImportError:
 
 # --- 配置区域 ---
 # 在 Windows 上通常是 COM3, COM4 等。请在设备管理器中确认 CP210x 的端口
-PORT = "COM3"  
+PORT = "COM4"  
 BAUD = 115200  # M5 版本固定波特率
 
 def test_arm():

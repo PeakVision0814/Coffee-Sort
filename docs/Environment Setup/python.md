@@ -40,22 +40,36 @@ Python 是一门解释型、动态类型的高级编程语言。它以“代码�
 
 ### 1. 获取安装包
 
-* **官方下载：** 访问 [python.org/downloads](https://www.google.com/search?q=https://www.python.org/downloads/)。
+* **官方下载：** 访问 [python.org/downloads](https://www.python.org/downloads/)。
 * **版本建议：** 工业环境求稳不求新。建议下载 **Python 3.10.x** 或 **Python 3.11.x** 的 Stable Release（稳定版）。避免使用最新的 3.13+（部分第三方库可能暂不支持）。
-* **文件选择：** 下载 `Windows installer (64-bit)`。
+> 按照大象机器人的官方教程，本项目推荐使用**Python 3.10.7**。
+* **文件选择：** 下载[`Windows installer (64-bit)`](https://www.python.org/ftp/python/3.10.8/python-3.10.8-amd64.exe)。
 
 ### 2. 安装步骤详解 —— 【关键节点】
 
-双击运行安装程序（如 `python-3.10.11-amd64.exe`）。
+双击运行安装程序（如 `python-3.10.7-amd64.exe`）。
 
 **步骤 1：初始界面（至关重要！）**
 在安装界面的最下方，**必须勾选**以下两个选项：
 
+![Python安装初始界面](img/Python安装初始界面.png)
+
 1. `Install launcher for all users` (推荐勾选)
-2. **`Add Python 3.x to PATH` (务必勾选！)**
+
+2. **`Add Python 3.10 to PATH` (务必勾选！)**
     * *警告：* 如果漏选此项，你在 CMD 命令行中输入 `python` 将没有任何反应，后续修复环境变量非常麻烦。
 
 点击 **Install Now**（立即安装）或 **Customize installation**（自定义安装）。建议直接点击 **Install Now** 安装到默认路径。
+
+![Python自定义安装](img/Python自定义安装选项.png)
+
+按照如图进行勾选，点击`Next`。
+
+![Python自定义安装](img/Python自定义安装.png)
+
+随后等待进度条结束即可。
+
+![Python安装进度条t](img/Python安装进度条.png)
 
 **步骤 2：路径长度限制（可选）**
 安装进度条走完后，如果出现 `Disable path length limit` 的提示按钮：
@@ -64,6 +78,8 @@ Python 是一门解释型、动态类型的高级编程语言。它以“代码�
 
 **步骤 3：完成**
 点击 **Close** 关闭窗口。
+
+![Python安装完成界面](img/Python安装完成界面.png)
 
 ---
 
@@ -77,7 +93,9 @@ Python 是一门解释型、动态类型的高级编程语言。它以“代码�
 python --version
 ```
 
-* **成功标志：** 屏幕显示类似 `Python 3.10.11` 的版本号。
+![验证Python环境](img/验证Python环境.png)
+
+* **成功标志：** 屏幕显示 `Python 3.10.7` 的版本号。
 * **失败标志：** 提示“'python' 不是内部或外部命令...”，说明安装时未勾选 `Add to PATH`，建议重新安装并勾选。
 
 ### 2. Hello World 测试
@@ -87,6 +105,8 @@ python --version
 ```python
 print("Hello, Industrial World!")
 ```
+
+![Hello World测试](img/Hello_World测试.png)
 
 回车后看到输出文字，说明解释器工作正常。输入 `exit()` 退出。
 

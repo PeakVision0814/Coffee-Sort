@@ -102,7 +102,16 @@ def main():
 
     try:
         while True:
-            if time.time() - state.last_heartbeat > 3.0: break
+            # 🔥 修改点 1：移除心跳超时自动退出的逻辑
+            # 原代码: if time.time() - state.last_heartbeat > 3.0: break
+            
+            # 🔥 修改点 2：改为“心跳超时自动暂停”，但保持程序运行
+            if state.mode != "IDLE" and (time.time() - state.last_heartbeat > 5.0):
+                print("⚠️ [System] 心跳丢失 (网页可能已关闭或后台挂起)，强制暂停机械臂")
+                state.mode = "IDLE"
+                state.current_task = None
+                # 注意：这里不 break，程序继续跑，等你回来重连
+
             ret, frame = cap.read()
             if not ret: 
                 time.sleep(0.1)
