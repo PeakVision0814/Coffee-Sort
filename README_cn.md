@@ -119,6 +119,30 @@ coffee_sort/
 
 ---
 
+## 相关设置
+
+本项目一共三台设备，设备主机设置如下：
+
+1号主机：ZC-Coffee-03
+
+```bash
+user.email=coffee_sort_01@zhicheng.com
+user.name=ZC-Coffee-01
+```
+
+2号主机：ZC-Coffee-02
+
+```bash
+user.email=coffee_sort_02@zhicheng.com
+user.name=ZC-Coffee-02
+```
+
+3号主机：ZC-Coffee-03
+```bash
+user.email=coffee_sort_03@zhicheng.com
+user.name=ZC-Coffee-03
+```
+
 ## ⚙️ 技术细节
 
 ### 为什么选择“定点盲抓”？
