@@ -32,18 +32,26 @@
 
 双击运行安装包，按照以下流程操作：
 
+![Anaconda安装界面](img/Anaconda安装界面.png)
+
 **步骤 1：许可与用户 (Select Installation Type)**
+
+![Anaconda许可与用户](img/Anaconda许可与用户.png)
 
 * 选择 **Just Me (recommended)**。
 * *解释：* 这样安装不需要管理员权限，且不会干扰系统里其他用户的配置，减少权限报错。
 
 **步骤 2：安装路径 (Choose Install Location)**
 
-* **建议：** 不要安装在 C 盘（因为很大），也不要安装在**包含中文或空格**的路径下。
-* 具体请按照实际情况进行填写
+![Anaconda安装路径](img/Anaconda安装路径.png)
+
+* **建议：** 一般来说不建议安装在 C 盘（因为很大），也不要安装在**包含中文或空格**的路径下。
+* 具体请按照实际情况进行填写，例如部分工业电脑只有一个C盘，安装时就使用默认路径即可。
 
 **步骤 3：高级选项 (Advanced Options) —— 【关键决策】**
 安装界面会有两个复选框，请按如下建议勾选：
+
+![Anaconda安装高级选项](img/Anaconda安装高级选项.png)
 
 1. 🔲 **Add Anaconda3 to my PATH environment variable**
     * **建议：不勾选**（或者该选项显示为红色）。
@@ -55,6 +63,10 @@
     * *原因：* 让 VS Code 或 PyCharm 等编辑器能自动检测到它。
 
 点击 **Install** 等待安装完成（可能需要几分钟）。最后点击 **Finish**（可以取消勾选 "Tutorial" 相关的选项）。
+
+![Anaconda安装进度条](img/Anaconda安装进度条.png)
+
+![Anaconda安装完成](img/Anaconda安装完成.png)
 
 ---
 
@@ -99,7 +111,7 @@ conda config --set show_channel_urls yes
 
 ---
 
-## 第五部分：核心操作手册（工程人员必会）
+## 第五部分：核心操作手册
 
 在日常开发中，请严格遵守“**一项目一环境**”的原则。
 
