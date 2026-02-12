@@ -110,19 +110,39 @@ def chat():
             for chunk in stream:
                 full_response_buffer += chunk # 后台偷偷记下来
                 yield chunk                   # 立刻发给前端 (实现打字机效果)
-            
+                
             # 2. 流结束后，后台提取指令 (用户看不见这步)
             if system_state:
-                # 这里的 extract_command 需要足够强大，能从一堆文本里抠出 JSON
-                cmd = ai_module.extract_command(full_response_buffer)
-                if cmd:
-                    print(f"⚡ [Web] 识别到指令: {cmd}")
-                    system_state.pending_ai_cmd = cmd
+                import re
+                
+                # 🔥 核心修改 1：正则同时支持 {...} 和 [...]
+                # (\[|\{) 匹配 [ 或 { 开头
+                # .*? 非贪婪匹配
+                # (\]|\}) 匹配 ] 或 } 结尾
+                json_match = re.search(r'```json\s*((\[|\{).*?(\]|\}))\s*```', full_response_buffer, re.DOTALL)
+                
+                if json_match:
+                    try:
+                        json_str = json_match.group(1)
+                        cmd_data = json.loads(json_str)
+                        
+                        # 🔥 核心修改 2：统一标准化为 List
+                        if isinstance(cmd_data, dict):
+                            # 如果 AI 只发了一条指令，把它包成列表 [cmd]
+                            system_state.pending_ai_cmd = [cmd_data]
+                        elif isinstance(cmd_data, list):
+                            # 如果 AI 发了数组，直接赋值
+                            system_state.pending_ai_cmd = cmd_data
+                            
+                        print(f"⚡ [Web] 识别到指令: {system_state.pending_ai_cmd}")
+                    except Exception as e:
+                        print(f"❌ JSON Parse Error: {e}")
         else:
             yield "❌ AI 模块未连接"
 
     # 返回流式响应
     return Response(stream_with_context(generate()), mimetype='text/plain')
+    
 
 @app.route('/command', methods=['POST'])
 def command():

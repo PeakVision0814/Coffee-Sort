@@ -168,85 +168,62 @@ def main():
             processed_frame, vision_data = vision.process_frame(frame)
             
             if state.pending_ai_cmd:
-                cmd = state.pending_ai_cmd
-                cmd_action = cmd.get('action')
-                cmd_type = cmd.get('type')
+                # 获取指令列表 (web_server 已经保证它是一个 list)
+                cmd_list = state.pending_ai_cmd
                 
-                print(log_msg("INFO", "Main", f"Received CMD: {cmd}"))
+                print(log_msg("INFO", "Main", f"Received Batch CMDs: {len(cmd_list)}"))
 
-                if cmd_action == 'start':
-                    if state.mode == "IDLE":
-                        state.system_msg = "Initializing arm..."
-                        arm.go_observe()
+                # 🔥 核心修改：遍历执行每一条指令
+                for cmd in cmd_list:
+                    cmd_action = cmd.get('action')
+                    cmd_type = cmd.get('type')
+
+                    # --- 1. 修正库存 ---
+                    if cmd_type == 'inventory_update':
+                        sid = cmd.get('slot_id')
+                        sts = cmd.get('status')
                         
-                        state.mode = "AUTO"
-                        state.current_task = None 
-                        state.system_msg = "Auto-sorting pipeline started."
-                        print(log_msg("INFO", "System", "Mode switched to AUTO"))
+                        if sid == 0: # 批量
+                            for i in range(1, 7): state.inventory[i] = sts
+                            status_str = "FULL" if sts == 1 else "EMPTY"
+                            msg = f"Manual override: ALL SLOTS set to {status_str}."
+                            state.system_msg = msg
+                            print(log_msg("INFO", "System", msg))
+                            
+                        elif sid in state.inventory: # 单个
+                            state.inventory[sid] = sts
+                            status_str = "FULL" if sts == 1 else "EMPTY"
+                            state.system_msg = f"Manual update: Slot {sid} -> {status_str}."
+                            print(log_msg("INFO", "System", f"Manual update: Slot {sid} -> {status_str}"))
+
+                    # --- 2. 分拣任务 ---
+                    elif cmd_type == 'sort':
+                        target_slot = cmd.get('slot_id')
+                        target_color = cmd.get('color', 'any').lower()
                         
-                elif cmd_action == 'stop':
-                    state.mode = "IDLE"
-                    state.current_task = None
-                    state.system_msg = "System stopped by user."
-                    print(log_msg("INFO", "System", "Mode switched to IDLE"))
-                    
-                elif cmd_action == 'reset':
-                    if state.mode in ["IDLE"]:
-                        arm.go_observe()
-                        state.system_msg = "Arm reset completed."
-                    else:
-                        state.system_msg = "⚠️ Cannot reset while busy."
-                        
-                elif cmd_action == 'clear_all':
-                    if state.mode in ["IDLE"]:
-                        state.inventory = {i: 0 for i in range(1, 7)}
-                        state.system_msg = "Inventory cleared."
-                        print(log_msg("INFO", "System", "Inventory reset to 0"))
-                    else:
-                        state.system_msg = "⚠️ Cannot clear inventory while busy."
-                        
-                elif cmd_action == 'scan':
-                    report = [f"Slot{i}:{'FULL' if state.inventory[i] else 'EMPTY'}" for i in range(1,7)]
-                    state.system_msg = " | ".join(report)
-                    
-                elif cmd_type == 'inventory_update':
-                    sid = cmd.get('slot_id')
-                    sts = cmd.get('status') # 0 代表空，1 代表满
-                    
-                    # 🔥 新增逻辑：处理 "所有" (slot_id = 0)
-                    if sid == 0:
-                        # 循环更新所有槽位
-                        for i in range(1, 7):
-                            state.inventory[i] = sts
-                        
-                        status_str = "FULL" if sts == 1 else "EMPTY"
-                        msg = f"Manual override: ALL SLOTS set to {status_str}."
-                        state.system_msg = msg
-                        print(log_msg("INFO", "System", msg))
-                        
-                    # 原有逻辑：处理单个槽位
-                    elif sid in state.inventory:
-                        state.inventory[sid] = sts
-                        status_str = "FULL" if sts == 1 else "EMPTY"
-                        state.system_msg = f"Manual update: Slot {sid} -> {status_str}."
-                        print(log_msg("INFO", "System", f"Manual update: Slot {sid} -> {status_str}"))
-                        
-                elif cmd_type == 'sort':
-                    target_slot = cmd.get('slot_id')
-                    target_color = cmd.get('color', 'any').lower()
-                    
-                    if target_slot and 1 <= target_slot <= 6:
-                        if state.inventory[target_slot] == 1:
-                            err_msg = f"⚠️ Operation denied: Slot {target_slot} is FULL."
-                            print(log_msg("WARN", "System", err_msg))
-                            state.system_msg = err_msg
-                        else:
+                        if target_slot and state.inventory.get(target_slot) == 0:
                             state.current_task = {'slot': target_slot, 'color': target_color}
                             state.mode = "SORTING_TASK"
-                            print(log_msg("INFO", "Task", f"Target locked: {target_color} -> Slot {target_slot}"))
-                    else:
-                        state.system_msg = "⚠️ Invalid slot ID."
+                            print(log_msg("INFO", "Task", f"Sorting {target_color} to Slot {target_slot}"))
+                        else:
+                            state.system_msg = f"⚠️ Slot {target_slot} is FULL or Invalid."
+                            print(log_msg("WARN", "System", f"Sort rejected: Slot {target_slot} full."))
 
+                    # --- 3. 系统动作 ---
+                    elif cmd_action == 'start':
+                        if state.mode == "IDLE":
+                            arm.go_observe()
+                            state.mode = "AUTO"
+                            state.system_msg = "Auto-mode ON."
+                            print(log_msg("INFO", "System", "Mode switched to AUTO"))
+                    elif cmd_action == 'stop':
+                        state.mode = "IDLE"; state.system_msg = "System STOPPED."
+                    elif cmd_action == 'reset':
+                        arm.go_observe(); state.system_msg = "Arm RESET."
+                    elif cmd_action == 'clear_all':
+                        state.inventory = {i: 0 for i in range(1, 7)}; state.system_msg = "Inventory CLEARED."
+
+                # 处理完后清空
                 state.pending_ai_cmd = None
 
             web_server.update_frame(processed_frame)
