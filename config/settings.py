@@ -2,7 +2,7 @@
 
 # --- 硬件通信 ---
 SIMULATION_MODE = False
-PORT = "COM4"
+PORT = "COM3"
 BAUD = 115200
 
 # --- 🎯 核心策略：全角度控制 (Angle Control) ---

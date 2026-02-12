@@ -18,4 +18,3 @@ logs/
 generate_tree.py
 
 config/ai_config.json
-!config/ai_config.json.example
