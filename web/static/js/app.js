@@ -1,4 +1,4 @@
-// ... (保留前面的变量定义和 PROVIDER_DEFAULTS) ...
+// web/static/js/app.js
 
 let settingsModal;
 let currentMode = "IDLE"; 
@@ -13,16 +13,57 @@ const PROVIDER_DEFAULTS = {
 };
 
 document.addEventListener('DOMContentLoaded', function() {
-    initInventoryGrid(); // 初始化空网格
+    initInventoryGrid(); 
     settingsModal = new bootstrap.Modal(document.getElementById('settingsModal'));
+    
+    loadHistoryLogs(); // 加载系统日志
+    loadChatHistory(); // 🔥 新增：加载聊天历史
+    
     setInterval(fetchStatus, 1000);
     setInterval(sendHeartbeat, 1000);
     refreshModelDisplay();
+    initSpeech();
 });
 
-// ... (typeWriter, refreshModelDisplay, toggleSystemMode, isSystemBusy 保持不变) ...
+// 🔥 新增：加载聊天历史函数
+function loadChatHistory() {
+    fetch('/api/chat_history')
+        .then(res => res.json())
+        .then(data => {
+            const history = data.history;
+            if (!history || history.length === 0) return;
 
-// 打字机动画 (保持不变)
+            history.forEach(item => {
+                // 处理 'system' 类型消息 (操作日志)
+                if (item.type === 'system') {
+                    const box = document.getElementById('chat-box');
+                    const row = document.createElement('div');
+                    row.className = 'chat-row system';
+                    // 显示简单的灰色操作记录
+                    row.innerHTML = `<div class="chat-message system" style="font-size: 0.75rem; opacity: 0.8;">
+                        <i class="fas fa-terminal me-1"></i> ${item.message} 
+                        <span class="ms-2" style="font-size:0.7em; opacity:0.6;">${item.timestamp}</span>
+                    </div>`;
+                    box.appendChild(row);
+                } else {
+                    // 普通对话：复用 appendChat
+                    appendChat(item.sender, item.message, item.type, false);
+                }
+            });
+            
+            // 插入一条历史分割线
+            const box = document.getElementById('chat-box');
+            const sep = document.createElement('div');
+            sep.className = 'chat-row system my-3';
+            sep.innerHTML = '<span class="badge bg-secondary bg-opacity-25 text-light border border-secondary" style="font-size: 0.7rem;">--- 以上是历史记录 ---</span>';
+            box.appendChild(sep);
+            
+            box.scrollTop = box.scrollHeight;
+        })
+        .catch(err => console.error("加载聊天记录失败", err));
+}
+
+// 打字机动画
 function typeWriter(element, text, speed = 30) {
     let i = 0;
     function type() {
@@ -53,7 +94,6 @@ function isSystemBusy() {
             currentMode === 'SINGLE_TASK' || currentMode === 'SORTING_TASK');
 }
 
-// updateUIState 里的逻辑稍微适配一下 Dark Mode 的按钮颜色
 function updateUIState(mode) {
     currentMode = mode; 
     const btnMain = document.getElementById('btn-main-toggle');
@@ -63,13 +103,11 @@ function updateUIState(mode) {
     const chatBtn = document.getElementById('btn-send');
     const chatBox = document.getElementById('chat-box');
 
-    // 解锁输入框
     chatInput.disabled = false;
     chatBox.style.pointerEvents = "auto";
     chatBtn.disabled = false;
 
     if (isSystemBusy()) {
-        // 忙碌状态 (红色主题)
         btnMain.className = "btn btn-danger btn-lg w-100 mb-3 py-3 fw-bold shadow-lg";
         btnMain.innerHTML = '<i class="fas fa-stop-circle me-2 animate-pulse"></i> 停止运行 (STOP)';
         statusText.innerHTML = '<span class="text-danger"><i class="fas fa-cog fa-spin me-1"></i> SYSTEM BUSY</span>';
@@ -81,7 +119,6 @@ function updateUIState(mode) {
         chatBtn.className = "btn btn-danger fw-bold";
         chatBtn.innerHTML = '<i class="fas fa-hand-paper me-1"></i> 中断';
     } else {
-        // 空闲状态 (绿色主题)
         btnMain.className = "btn btn-success btn-lg w-100 mb-3 py-3 fw-bold shadow-lg";
         btnMain.innerHTML = '<i class="fas fa-rocket me-2"></i> 启动自动分拣 (AUTO)';
         statusText.innerHTML = '<span class="text-success"><i class="fas fa-check-circle me-1"></i> SYSTEM READY</span>';
@@ -103,28 +140,14 @@ function fetchStatus() {
             
             updateInventory(data.inventory);
             
-            // 处理系统消息 (保持你原有的逻辑)
+            // 🔥 核心修复：系统消息必须进 Log，绝对不能进 Chat！
+            // ❌ 之前的错误代码是: appendChat(...) 或 typeWriter(...)
+            // ✅ 正确代码是: appendLog(...)
             if (data.system_msg) {
-                if (activeAiBubble) {
-                    const loader = activeAiBubble.querySelector('.typing-indicator');
-                    if (loader) loader.remove();
-                    const span = document.createElement('span');
-                    if (data.system_msg.includes('⚠️') || data.system_msg.includes('❌')) {
-                        span.className = "system-append-span error";
-                    } else {
-                        span.className = "system-append-span";
-                    }
-                    span.innerHTML = " "; 
-                    activeAiBubble.appendChild(span);
-                    typeWriter(span, data.system_msg);
-                    activeAiBubble = null; 
-                } else {
-                    const bubble = appendChat("AI", "", "ai", false); 
-                    typeWriter(bubble, data.system_msg);
-                }
+                appendLog(data.system_msg, 'sys');
             }
 
-            // 更新 Badge (右上角连接状态)
+            // 更新右上角状态 Badge
             const badge = document.getElementById('sys-mode');
             if (isSystemBusy()) {
                 badge.innerHTML = '<i class="fas fa-bolt text-warning me-1"></i> WORKING';
@@ -138,7 +161,6 @@ function fetchStatus() {
         }).catch(err => {});
 }
 
-// ... (sendChat, appendChat, handleEnter 保持不变) ...
 async function sendChat() {
     if (isSystemBusy()) {
         sendCommand('stop');
@@ -149,18 +171,15 @@ async function sendChat() {
     const text = input.value.trim();
     if (!text) return;
 
-    // 清理之前的 loading
     if (activeAiBubble) {
         const loader = activeAiBubble.querySelector('.typing-indicator');
         if (loader) loader.remove();
         activeAiBubble = null;
     }
 
-    // 1. 显示用户消息
     appendChat("我", text, "user");
     input.value = '';
 
-    // 2. 创建一个空的 AI 气泡
     const aiBubble = appendChat("AI", "", "ai", true); 
     activeAiBubble = aiBubble; 
     const loader = aiBubble.querySelector('.typing-indicator');
@@ -188,7 +207,6 @@ async function sendChat() {
             const chunk = decoder.decode(value, { stream: true });
             aiBubble.innerHTML += chunk; 
             
-            // 自动滚动到底部
             const box = document.getElementById('chat-box');
             box.scrollTop = box.scrollHeight;
         }
@@ -243,7 +261,6 @@ function handleEnter(e) {
     }
 }
 
-// 🔥 核心修改：库存可视化渲染 (图标化)
 function initInventoryGrid() {
     const container = document.getElementById('inventory-grid');
     container.innerHTML = '';
@@ -275,7 +292,6 @@ function updateInventory(inventory) {
     }
 }
 
-// 🔥 核心修改 2：新增日志处理
 function appendLog(msg, type='info') {
     const terminal = document.getElementById('log-terminal');
     if (!terminal) return;
@@ -283,9 +299,7 @@ function appendLog(msg, type='info') {
     const div = document.createElement('div');
     div.className = 'log-line';
     
-    // 🔥 修改点：增加日期显示 (格式: YYYY-MM-DD HH:MM:SS)
     const now = new Date();
-    // 手动拼接以保证格式统一 (或者使用 toLocaleString 并配置 options)
     const dateStr = now.toLocaleDateString('zh-CN').replace(/\//g, '-');
     const timeStr = now.toLocaleTimeString('en-GB', { hour12: false });
     const fullTime = `${dateStr} ${timeStr}`;
@@ -300,39 +314,41 @@ function appendLog(msg, type='info') {
     div.innerHTML = `<span class="text-muted">[${fullTime}]</span> <span class="${colorClass}">${msg}</span>`;
     
     terminal.appendChild(div);
-    terminal.scrollTop = terminal.scrollHeight; // 自动滚动到底部
+    terminal.scrollTop = terminal.scrollHeight;
 }
 
-function clearLogs() {
-    document.getElementById('log-terminal').innerHTML = '<div class="log-line"><span class="text-muted">[SYS]</span> Logs cleared.</div>';
-}
-
-function fetchStatus() {
-    fetch('/status')
+function loadHistoryLogs() {
+    fetch('/api/logs')
         .then(res => res.json())
         .then(data => {
-            if(data.mode === "OFFLINE") return;
-            
-            updateInventory(data.inventory);
-            
-            // 🔥 核心修改 3：系统消息不再进聊天框，而是进 Log
-            if (data.system_msg) {
-                appendLog(data.system_msg, 'sys');
-            }
+            const terminal = document.getElementById('log-terminal');
+            if (!terminal || !data.logs) return;
 
-            // 更新 Badge
-            const badge = document.getElementById('sys-mode');
-            if (isSystemBusy()) {
-                badge.innerHTML = '<i class="fas fa-bolt text-warning me-1"></i> WORKING';
-                badge.className = "badge bg-dark border border-warning text-warning";
-            } else {
-                badge.innerHTML = '<i class="fas fa-check text-success me-1"></i> ONLINE';
-                badge.className = "badge bg-dark border border-success text-success";
-            }
+            terminal.innerHTML = ''; 
+
+            data.logs.forEach(line => {
+                const div = document.createElement('div');
+                div.className = 'log-line';
+                
+                if (line.includes('WARN')) div.className += ' log-warn';
+                else if (line.includes('ERROR')) div.className += ' log-err';
+                else if (line.includes('[System]')) div.className += ' log-sys';
+                else div.className += ' text-light';
+
+                div.innerText = line; 
+                terminal.appendChild(div);
+            });
             
-            updateUIState(data.mode);
-        }).catch(err => {});
+            const sep = document.createElement('div');
+            sep.className = 'log-line text-muted text-center my-2';
+            sep.innerText = '--- History Loaded ---';
+            terminal.appendChild(sep);
+
+            terminal.scrollTop = terminal.scrollHeight;
+        })
+        .catch(err => console.error("无法加载历史日志", err));
 }
+
 function sendCommand(action) {
     fetch('/command', {
         method: 'POST',
@@ -340,7 +356,7 @@ function sendCommand(action) {
         body: JSON.stringify({ action: action })
     }).then(res => res.json()).then(data => {});
 }
-// 设置相关函数保持不变
+
 function openSettings() {
     fetch('/api/settings').then(res => res.json()).then(data => {
         const provider = data.provider || 'deepseek';
@@ -388,11 +404,6 @@ function saveSettings() {
 }
 function sendHeartbeat() { fetch('/heartbeat', { method: 'POST' }).catch(e => {}); }
 
-
-// ==========================================
-// 🎤 语音识别 (适配新 UI 逻辑)
-// ==========================================
-
 let recognition = null;
 let isRecording = false;
 
@@ -415,9 +426,8 @@ function initSpeech() {
         const btn = document.getElementById('btn-mic');
         const status = document.getElementById('voice-status');
         
-        // 🔥 动画逻辑：添加 mic-active 类触发 Ripple 动画
         if(btn) {
-            btn.classList.add('mic-active'); // 使用 CSS 定义的动画类
+            btn.classList.add('mic-active');
             btn.classList.remove('btn-outline-secondary');
         }
         if(status) status.innerText = "🎤 正在聆听... (Listening)";
@@ -428,7 +438,6 @@ function initSpeech() {
         const btn = document.getElementById('btn-mic');
         const status = document.getElementById('voice-status');
         
-        // 🔥 动画逻辑：移除
         if(btn) {
             btn.classList.remove('mic-active');
             btn.classList.add('btn-outline-secondary');
@@ -441,7 +450,6 @@ function initSpeech() {
         }
     };
 
-    // onresult 和 onerror 保持不变...
     recognition.onresult = function(event) {
         let interimTranscript = '';
         let finalTranscript = '';
@@ -471,52 +479,4 @@ function toggleSpeechRecognition() {
     if (!recognition) return;
     if (isRecording) recognition.stop();
     else recognition.start();
-}
-
-document.addEventListener('DOMContentLoaded', function() {
-    initInventoryGrid();
-    settingsModal = new bootstrap.Modal(document.getElementById('settingsModal'));
-    
-    loadHistoryLogs(); // 🔥 新增：加载历史日志
-    
-    setInterval(fetchStatus, 1000);
-    setInterval(sendHeartbeat, 1000);
-    refreshModelDisplay();
-    initSpeech();
-});
-
-// 🔥 新增：加载历史日志函数
-function loadHistoryLogs() {
-    fetch('/api/logs')
-        .then(res => res.json())
-        .then(data => {
-            const terminal = document.getElementById('log-terminal');
-            if (!terminal || !data.logs) return;
-
-            // 清空初始的 [INIT] 消息 (可选)
-            terminal.innerHTML = ''; 
-
-            data.logs.forEach(line => {
-                const div = document.createElement('div');
-                div.className = 'log-line';
-                
-                // 简单的颜色高亮解析
-                if (line.includes('WARN')) div.className += ' log-warn';
-                else if (line.includes('ERROR')) div.className += ' log-err';
-                else if (line.includes('[System]')) div.className += ' log-sys';
-                else div.className += ' text-light'; // 默认白色/浅灰
-
-                div.innerText = line; // 使用 innerText 防止 XSS，且日志本身是纯文本
-                terminal.appendChild(div);
-            });
-            
-            // 插入一条分割线，区分历史和当前
-            const sep = document.createElement('div');
-            sep.className = 'log-line text-muted text-center my-2';
-            sep.innerText = '--- History Loaded ---';
-            terminal.appendChild(sep);
-
-            terminal.scrollTop = terminal.scrollHeight;
-        })
-        .catch(err => console.error("无法加载历史日志", err));
 }
