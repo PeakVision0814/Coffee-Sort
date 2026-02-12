@@ -1,90 +1,221 @@
-/* 全局设置 */
-body {
-    background-color: #f0f2f5;
-    font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
+/* =========================================
+   🎨 全局变量与基础设置 (Dark Sci-Fi Theme)
+   ========================================= */
+:root {
+    --bg-dark: #0f172a;       /* 深蓝黑背景 */
+    --panel-bg: #1e293b;      /* 面板背景 */
+    --panel-border: #334155;  /* 边框颜色 */
+    --text-main: #e2e8f0;     /* 主要文字 */
+    --text-muted: #94a3b8;    /* 次要文字 */
+    --accent-cyan: #06b6d4;   /* 青色强调 (AI/系统) */
+    --accent-green: #10b981;  /* 绿色状态 (正常) */
+    --accent-warn: #f59e0b;   /* 琥珀色 (满载) */
+    --accent-danger: #ef4444; /* 红色 (停止/录音) */
 }
+
+body {
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
+    background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, #0f172a 70%);
+}
+
+/* 滚动条美化 */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #64748b; }
 
 /* 导航栏 */
-.bg-dark-blue {
-    background-color: #1a2332;
-    border-bottom: 3px solid #0dcaf0;
+.navbar {
+    background: rgba(15, 23, 42, 0.9) !important;
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--panel-border);
 }
-.status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background-color: #6c757d; }
-.status-dot.online { background-color: #00ff88; box-shadow: 0 0 5px #00ff88; }
+.navbar-brand i { color: var(--accent-cyan) !important; }
 
-/* 监控与槽位 */
-.monitor-frame { background-color: #000; border-radius: 6px; overflow: hidden; display: flex; justify-content: center; align-items: center; }
-.monitor-frame img { height: 100%; object-fit: contain; }
+/* 卡片通用 */
+.card {
+    background-color: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+    color: var(--text-main);
+}
+.card-header, .card-footer {
+    background-color: rgba(30, 41, 59, 0.5) !important;
+    border-color: var(--panel-border) !important;
+}
+.text-muted { color: var(--text-muted) !important; }
 
-.slot-box { background-color: #fff; border: 1px solid #e9ecef; border-radius: 4px; height: 60px; display: flex; justify-content: space-between; align-items: center; padding: 0 15px; transition: all 0.2s; }
-.slot-number { font-weight: 700; color: #ced4da; font-size: 1.2rem; }
-.slot-status { font-size: 0.7rem; font-weight: 600; padding: 2px 6px; border-radius: 4px; background-color: #e9ecef; color: #6c757d; }
-.slot-full { border-left: 4px solid #ffc107; background-color: #fff; }
-.slot-full .slot-number { color: #495057; }
-.slot-full .slot-status { background-color: #ffc107; color: #000; }
+/* 监控画面 */
+.monitor-frame {
+    background-color: #000;
+    border: 1px solid #334155;
+    position: relative;
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+}
+.monitor-frame::after {
+    content: " "; display: block; position: absolute; top: 0; left: 0; bottom: 0; right: 0;
+    background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+    z-index: 2; background-size: 100% 2px, 3px 100%; pointer-events: none;
+}
 
-/* --- 聊天区域核心样式 --- */
+/* 库存图标 */
+.slot-box {
+    background-color: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    height: 70px;
+    display: flex; justify-content: space-between; align-items: center; padding: 0 15px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative; overflow: hidden;
+}
+.slot-number { font-size: 0.9rem; color: var(--text-muted); font-weight: bold; }
+.slot-icon { font-size: 1.5rem; color: #475569; transition: all 0.3s; }
+.slot-text { font-size: 0.8rem; font-weight: 600; color: var(--text-muted); }
+
+.slot-full {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(245, 158, 11, 0.05) 100%);
+    border-color: var(--accent-warn);
+    transform: scale(1.02);
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.2);
+}
+.slot-full .slot-icon { color: var(--accent-warn); transform: scale(1.2); }
+.slot-full .slot-text { color: var(--accent-warn); }
+.slot-full::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--accent-warn); }
+
+/* =========================================
+   💬 聊天区域 (Bubble Style 优化版)
+   ========================================= */
 
 .ai-panel { border-radius: 12px; overflow: hidden; }
+
+/* 背景带点阵纹理 */
 .chat-container {
-    background-color: #f8f9fa;
-    scrollbar-width: thin;
-    scrollbar-color: #dee2e6 #f8f9fa;
-    display: flex; flex-direction: column; gap: 15px; padding: 20px;
+    background-color: #0f172a;
+    background-image: radial-gradient(#334155 1px, transparent 1px);
+    background-size: 20px 20px;
+    display: flex; flex-direction: column; gap: 20px; padding: 20px;
 }
 
-/* 消息行 */
-.chat-row { display: flex; align-items: flex-start; gap: 10px; width: 100%; }
-.chat-row.user { flex-direction: row-reverse; }
-.chat-row.ai { flex-direction: row; }
-.chat-row.system { justify-content: center; }
+/* 消息行布局 */
+.chat-row { display: flex; align-items: flex-start; gap: 12px; width: 100%; animation: messageSlideIn 0.3s ease-out; }
+.chat-row.user { flex-direction: row-reverse; } /* 用户在右 */
+.chat-row.ai { flex-direction: row; }           /* AI 在左 */
+.chat-row.system { justify-content: center; }   /* 系统居中 */
 
-/* 头像 */
-.avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; justify-content: center; align-items: center; flex-shrink: 0; color: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-.avatar.ai { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-.avatar.user { background: linear-gradient(135deg, #00c6ff 0%, #0072ff 100%); }
-
-/* 气泡 */
+/* 气泡通用样式 */
 .chat-message {
-    padding: 12px 16px;
-    border-radius: 12px;
-    max-width: 75%;
+    padding: 12px 18px;
+    max-width: 75%; /* 限制宽度，更有气泡感 */
     position: relative;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-    line-height: 1.6; /*稍微增加行高，阅读更舒适*/
-    word-break: break-word;
+    line-height: 1.6;
     font-size: 0.95rem;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    word-wrap: break-word;
 }
-.chat-message.ai { background-color: #fff; border: 1px solid #e9ecef; border-top-left-radius: 2px; color: #333; }
-.chat-message.user { background-color: #0d6efd; color: white; border-top-right-radius: 2px; }
-.chat-message.system { background: none; box-shadow: none; font-size: 0.8rem; color: #adb5bd; text-align: center; padding: 0; max-width: 90%; }
 
-/* 🔥 优化：等待动画 (跳动的点) */
-.typing-indicator {
-    display: inline-flex; /* 让它在行内显示 */
-    align-items: center;
-    margin-left: 4px;
-    vertical-align: middle;
-    height: 1em;
+/* 🤖 AI 气泡 (左侧) */
+.chat-message.ai {
+    background-color: rgba(30, 41, 59, 0.95); /* 深灰磨砂 */
+    border: 1px solid var(--panel-border);
+    color: var(--text-main);
+    
+    /* 核心：非对称圆角 - 左上角直角 */
+    border-radius: 2px 18px 18px 18px; 
 }
+
+/* 👤 用户气泡 (右侧) */
+.chat-message.user {
+    background: linear-gradient(135deg, var(--accent-cyan) 0%, #0284c7 100%); /* 青蓝渐变 */
+    color: #fff;
+    
+    /* 核心：非对称圆角 - 右下角直角 */
+    border-radius: 18px 18px 2px 18px;
+    
+    box-shadow: 0 4px 12px rgba(6, 182, 212, 0.3); /* 发光效果 */
+}
+
+/* 系统消息 (居中胶囊) */
+.chat-message.system {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 50px;
+    font-size: 0.8rem;
+    padding: 5px 20px;
+    border: 1px solid var(--panel-border);
+    color: var(--text-muted);
+    max-width: 90%;
+    text-align: center;
+}
+
+/* 头像样式 */
+.avatar { 
+    width: 42px; height: 42px; border-radius: 50%; 
+    display: flex; justify-content: center; align-items: center; 
+    flex-shrink: 0; color: white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    font-size: 1.1rem;
+}
+.avatar.ai { background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%); border: 2px solid #1e293b; }
+.avatar.user { background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: 2px solid #1e293b; }
+
+/* 动画定义 */
+@keyframes messageSlideIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* 打字机光标点 */
+.typing-indicator { display: inline-flex; align-items: center; margin-left: 4px; height: 1em; }
 .typing-dot {
-    width: 4px; height: 4px; border-radius: 50%; background-color: #888;
-    margin: 0 2px;
-    animation: typing 1.4s infinite ease-in-out both;
+    width: 4px; height: 4px; border-radius: 50%; background-color: var(--accent-cyan);
+    margin: 0 2px; animation: typing 1.4s infinite ease-in-out both;
 }
 .typing-dot:nth-child(1) { animation-delay: -0.32s; }
 .typing-dot:nth-child(2) { animation-delay: -0.16s; }
 @keyframes typing { 0%, 80%, 100% { transform: scale(0); opacity: 0.5; } 40% { transform: scale(1); opacity: 1; } }
 
-/* 🔥 优化：追加的消息 (完全融入 AI 气泡) */
-.system-append-span {
-    font-weight: normal; /* 不加粗 */
-    color: inherit;      /* 跟随父元素颜色 (黑色/深灰) */
-    margin-left: 0;      /* 紧贴前文，或者留一个空格 */
+/* 消息追加样式 */
+.system-append-span { font-weight: normal; color: inherit; }
+.system-append-span.error { color: #fca5a5; font-weight: bold; }
+
+
+/* =========================================
+   🎤 控件与输入框
+   ========================================= */
+#btn-mic {
+    transition: all 0.3s;
+    border-radius: 50%;
+    width: 48px; height: 48px;
+    padding: 0; display: flex; align-items: center; justify-content: center;
+    margin-right: 10px;
+    background-color: transparent;
+    border: 1px solid var(--panel-border);
+    color: var(--text-muted);
+}
+#btn-mic:hover { background-color: rgba(255,255,255,0.05); color: white; }
+
+/* 录音波纹动画 */
+@keyframes ripple {
+    0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+    70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+.mic-active {
+    background-color: var(--accent-danger) !important;
+    border-color: var(--accent-danger) !important;
+    color: white !important;
+    animation: ripple 1.5s infinite;
 }
 
-/* 只有报错才显示红色，其他时候看起来就是 AI 说的话 */
-.system-append-span.error {
-    color: #dc3545;
-    font-weight: 500;
+#user-input {
+    background-color: rgba(15, 23, 42, 0.5);
+    border: 1px solid var(--panel-border);
+    color: white; border-radius: 24px;
 }
+#user-input:focus {
+    background-color: rgba(15, 23, 42, 0.8);
+    border-color: var(--accent-cyan);
+    box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.2);
+}
+#user-input::placeholder { color: #64748b; }
+#btn-send { border-radius: 24px; padding-left: 25px; padding-right: 25px; }

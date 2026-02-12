@@ -1,3 +1,5 @@
+// ... (保留前面的变量定义和 PROVIDER_DEFAULTS) ...
+
 let settingsModal;
 let currentMode = "IDLE"; 
 let activeAiBubble = null;
@@ -11,14 +13,16 @@ const PROVIDER_DEFAULTS = {
 };
 
 document.addEventListener('DOMContentLoaded', function() {
-    initInventoryGrid();
+    initInventoryGrid(); // 初始化空网格
     settingsModal = new bootstrap.Modal(document.getElementById('settingsModal'));
     setInterval(fetchStatus, 1000);
     setInterval(sendHeartbeat, 1000);
     refreshModelDisplay();
 });
 
-// 打字机动画
+// ... (typeWriter, refreshModelDisplay, toggleSystemMode, isSystemBusy 保持不变) ...
+
+// 打字机动画 (保持不变)
 function typeWriter(element, text, speed = 30) {
     let i = 0;
     function type() {
@@ -49,6 +53,7 @@ function isSystemBusy() {
             currentMode === 'SINGLE_TASK' || currentMode === 'SORTING_TASK');
 }
 
+// updateUIState 里的逻辑稍微适配一下 Dark Mode 的按钮颜色
 function updateUIState(mode) {
     currentMode = mode; 
     const btnMain = document.getElementById('btn-main-toggle');
@@ -58,36 +63,34 @@ function updateUIState(mode) {
     const chatBtn = document.getElementById('btn-send');
     const chatBox = document.getElementById('chat-box');
 
-    // 解锁输入框，允许随时打字
+    // 解锁输入框
     chatInput.disabled = false;
     chatBox.style.pointerEvents = "auto";
     chatBtn.disabled = false;
 
     if (isSystemBusy()) {
-        // 忙碌状态
-        btnMain.className = "btn btn-danger btn-lg w-100 mb-3 py-3 fw-bold shadow-sm";
-        btnMain.innerHTML = '<i class="fas fa-stop-circle me-2"></i> 停止自动运行';
-        statusText.innerHTML = '<span class="text-danger"><i class="fas fa-cog fa-spin me-1"></i> 系统运行中...</span>';
+        // 忙碌状态 (红色主题)
+        btnMain.className = "btn btn-danger btn-lg w-100 mb-3 py-3 fw-bold shadow-lg";
+        btnMain.innerHTML = '<i class="fas fa-stop-circle me-2 animate-pulse"></i> 停止运行 (STOP)';
+        statusText.innerHTML = '<span class="text-danger"><i class="fas fa-cog fa-spin me-1"></i> SYSTEM BUSY</span>';
         
-        aiBadge.className = "badge bg-secondary";
-        aiBadge.innerHTML = '<i class="fas fa-lock me-1"></i>AI 锁定';
+        aiBadge.className = "badge bg-secondary border border-secondary text-light opacity-50";
+        aiBadge.innerHTML = '<i class="fas fa-lock me-1"></i>AI LOCKED';
         
-        chatBox.style.opacity = "0.8";
-        chatInput.placeholder = "正在执行中...";
-        chatBtn.className = "btn btn-danger px-4";
-        chatBtn.innerHTML = '<i class="fas fa-sync-alt fa-spin me-1"></i> 停止';
+        chatInput.placeholder = "⚠ 系统执行中，AI 暂时锁定...";
+        chatBtn.className = "btn btn-danger fw-bold";
+        chatBtn.innerHTML = '<i class="fas fa-hand-paper me-1"></i> 中断';
     } else {
-        // 空闲状态
-        btnMain.className = "btn btn-success btn-lg w-100 mb-3 py-3 fw-bold shadow-sm";
-        btnMain.innerHTML = '<i class="fas fa-rocket me-2"></i> 启动自动分拣';
-        statusText.innerHTML = '<span class="text-success"><i class="fas fa-check-circle me-1"></i> 系统就绪</span>';
+        // 空闲状态 (绿色主题)
+        btnMain.className = "btn btn-success btn-lg w-100 mb-3 py-3 fw-bold shadow-lg";
+        btnMain.innerHTML = '<i class="fas fa-rocket me-2"></i> 启动自动分拣 (AUTO)';
+        statusText.innerHTML = '<span class="text-success"><i class="fas fa-check-circle me-1"></i> SYSTEM READY</span>';
         
-        aiBadge.className = "badge bg-success";
-        aiBadge.innerHTML = '<i class="fas fa-check-circle me-1"></i>AI 在线';
+        aiBadge.className = "badge bg-success bg-opacity-25 text-success border border-success";
+        aiBadge.innerHTML = '<i class="fas fa-brain me-1"></i>AI ACTIVE';
         
-        chatBox.style.opacity = "1.0";
-        chatInput.placeholder = "请输入指令...";
-        chatBtn.className = "btn btn-primary px-4";
+        chatInput.placeholder = "输入指令 (支持语音)...";
+        chatBtn.className = "btn btn-info text-white fw-bold";
         chatBtn.innerHTML = '发送 <i class="fas fa-paper-plane ms-2"></i>';
     }
 }
@@ -100,30 +103,20 @@ function fetchStatus() {
             
             updateInventory(data.inventory);
             
-            // 🔥 核心修复区
+            // 处理系统消息 (保持你原有的逻辑)
             if (data.system_msg) {
                 if (activeAiBubble) {
-                    // 1. 移除动画
                     const loader = activeAiBubble.querySelector('.typing-indicator');
                     if (loader) loader.remove();
-
-                    // 2. 创建追加的文本容器
                     const span = document.createElement('span');
-                    
                     if (data.system_msg.includes('⚠️') || data.system_msg.includes('❌')) {
                         span.className = "system-append-span error";
                     } else {
                         span.className = "system-append-span";
                     }
-                    
-                    // 🔥 修复：这里只给一个空格，不要赋值 data.system_msg，否则会重复！
                     span.innerHTML = " "; 
-                    
                     activeAiBubble.appendChild(span);
-                    
-                    // 3. 启动打字机 (这才是唯一一次输出文本的地方)
                     typeWriter(span, data.system_msg);
-                    
                     activeAiBubble = null; 
                 } else {
                     const bubble = appendChat("AI", "", "ai", false); 
@@ -131,20 +124,21 @@ function fetchStatus() {
                 }
             }
 
-            // 更新 Badge
+            // 更新 Badge (右上角连接状态)
             const badge = document.getElementById('sys-mode');
             if (isSystemBusy()) {
-                badge.innerText = "运行中";
-                badge.className = "badge bg-success";
+                badge.innerHTML = '<i class="fas fa-bolt text-warning me-1"></i> WORKING';
+                badge.className = "badge bg-dark border border-warning text-warning";
             } else {
-                badge.innerText = "空闲";
-                badge.className = "badge bg-warning text-dark";
+                badge.innerHTML = '<i class="fas fa-check text-success me-1"></i> ONLINE';
+                badge.className = "badge bg-dark border border-success text-success";
             }
             
             updateUIState(data.mode);
         }).catch(err => {});
 }
 
+// ... (sendChat, appendChat, handleEnter 保持不变) ...
 async function sendChat() {
     if (isSystemBusy()) {
         sendCommand('stop');
@@ -198,8 +192,6 @@ async function sendChat() {
             const box = document.getElementById('chat-box');
             box.scrollTop = box.scrollHeight;
         }
-        
-        // ❌ 这里删掉了 speakText()，只显示文字
 
     } catch (err) {
         aiBubble.innerHTML += "<br>[连接断开]";
@@ -251,28 +243,47 @@ function handleEnter(e) {
     }
 }
 
-// 辅助函数
+// 🔥 核心修改：库存可视化渲染 (图标化)
 function initInventoryGrid() {
     const container = document.getElementById('inventory-grid');
     container.innerHTML = '';
     for (let i = 1; i <= 6; i++) {
         container.innerHTML += `
             <div class="col-4">
-                <div class="slot-box slot-free" id="slot-${i}">
-                    <span class="slot-number">#${i}</span>
-                    <span class="slot-status">空闲</span>
+                <div class="slot-box" id="slot-${i}">
+                    <div class="d-flex flex-column">
+                        <span class="slot-number">#${i}</span>
+                        <span class="slot-text">EMPTY</span>
+                    </div>
+                    <i class="fas fa-box-open slot-icon"></i>
                 </div>
             </div>`;
     }
 }
+
 function updateInventory(inventory) {
     for (let i = 1; i <= 6; i++) {
         const el = document.getElementById(`slot-${i}`);
+        const icon = el.querySelector('.slot-icon');
+        const text = el.querySelector('.slot-text');
+        
         const isFull = inventory[i] === 1;
-        el.className = isFull ? 'slot-box slot-full' : 'slot-box slot-free';
-        el.querySelector('.slot-status').innerText = isFull ? '已满' : '空闲';
+        
+        if (isFull) {
+            // 状态改变：已满
+            el.className = 'slot-box slot-full';
+            icon.className = 'fas fa-cube slot-icon'; // 实心盒子图标
+            text.innerText = 'FULL';
+        } else {
+            // 状态改变：空闲
+            el.className = 'slot-box';
+            icon.className = 'fas fa-box-open slot-icon'; // 空盒子图标
+            text.innerText = 'EMPTY';
+        }
     }
 }
+
+// ... (sendCommand, openSettings 等保持不变) ...
 function sendCommand(action) {
     fetch('/command', {
         method: 'POST',
@@ -328,16 +339,15 @@ function saveSettings() {
 }
 function sendHeartbeat() { fetch('/heartbeat', { method: 'POST' }).catch(e => {}); }
 
+
 // ==========================================
-// 🎤 仅语音识别 (Web Speech API) 
+// 🎤 语音识别 (适配新 UI 逻辑)
 // ==========================================
 
 let recognition = null;
 let isRecording = false;
 
-// 初始化语音识别
 function initSpeech() {
-    // 兼容性检查
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
         console.warn("当前浏览器不支持 Web Speech API");
@@ -347,42 +357,45 @@ function initSpeech() {
     }
     
     recognition = new SpeechRecognition();
-    recognition.continuous = false; // 说完一句自动停止
-    recognition.interimResults = true; // 显示临时结果
-    recognition.lang = 'zh-CN'; // 中文
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = 'zh-CN';
 
     recognition.onstart = function() {
         isRecording = true;
         const btn = document.getElementById('btn-mic');
+        const status = document.getElementById('voice-status');
+        
+        // 🔥 动画逻辑：添加 mic-active 类触发 Ripple 动画
         if(btn) {
-            btn.classList.add('btn-danger', 'text-white');
+            btn.classList.add('mic-active'); // 使用 CSS 定义的动画类
             btn.classList.remove('btn-outline-secondary');
         }
-        const status = document.getElementById('voice-status');
-        if(status) status.innerText = "🎤 正在聆听... (请说话)";
+        if(status) status.innerText = "🎤 正在聆听... (Listening)";
     };
 
     recognition.onend = function() {
         isRecording = false;
         const btn = document.getElementById('btn-mic');
+        const status = document.getElementById('voice-status');
+        
+        // 🔥 动画逻辑：移除
         if(btn) {
-            btn.classList.remove('btn-danger', 'text-white');
+            btn.classList.remove('mic-active');
             btn.classList.add('btn-outline-secondary');
         }
-        const status = document.getElementById('voice-status');
         if(status) status.innerText = "";
         
-        // 语音结束后，如果输入框有内容，自动发送
         const input = document.getElementById('user-input');
         if (input && input.value.trim().length > 0) {
             sendChat(); 
         }
     };
 
+    // onresult 和 onerror 保持不变...
     recognition.onresult = function(event) {
         let interimTranscript = '';
         let finalTranscript = '';
-
         for (let i = event.resultIndex; i < event.results.length; ++i) {
             if (event.results[i].isFinal) {
                 finalTranscript += event.results[i][0].transcript;
@@ -390,37 +403,27 @@ function initSpeech() {
                 interimTranscript += event.results[i][0].transcript;
             }
         }
-        
         const input = document.getElementById('user-input');
         if (input) {
-            if (finalTranscript) {
-                input.value = finalTranscript;
-            } else {
-                input.placeholder = interimTranscript; 
-            }
+            if (finalTranscript) input.value = finalTranscript;
+            else input.placeholder = interimTranscript; 
         }
     };
     
     recognition.onerror = function(event) {
         console.error("语音识别错误:", event.error);
         const status = document.getElementById('voice-status');
-        if(status) status.innerText = "❌ 识别错误: " + event.error;
+        if(status) status.innerText = "❌ Error: " + event.error;
     };
 }
 
-// 切换录音状态
 function toggleSpeechRecognition() {
     if (!recognition) initSpeech();
     if (!recognition) return;
-
-    if (isRecording) {
-        recognition.stop();
-    } else {
-        recognition.start();
-    }
+    if (isRecording) recognition.stop();
+    else recognition.start();
 }
 
-// 初始化
 document.addEventListener('DOMContentLoaded', function() {
     initSpeech();
 });
