@@ -1,7 +1,7 @@
 # config/settings.py
 
 # --- 硬件通信 ---
-SIMULATION_MODE = True
+SIMULATION_MODE = False
 PORT = "COM3"
 BAUD = 115200
 
