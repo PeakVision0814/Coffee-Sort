@@ -40,9 +40,6 @@ class SystemState:
 
 state = SystemState()
 
-# ==========================================
-# 📝 日志系统配置 (Log Rotation)
-# ==========================================
 LOG_FILE_PATH = os.path.join("logs", "system.log")
 
 # 确保 logs 文件夹存在
@@ -57,8 +54,9 @@ logger.setLevel(logging.INFO)
 file_handler = RotatingFileHandler(
     LOG_FILE_PATH, maxBytes=2*1024*1024, backupCount=5, encoding='utf-8'
 )
-# 设置文件中的日志格式 (去掉颜色代码，只留纯文本)
-file_formatter = logging.Formatter('[%(asctime)s] %(levelname)s [%(name)s] %(message)s', datefmt='%H:%M:%S')
+
+# 🔥 修改点 1：格式化字符串增加 %Y-%m-%d
+file_formatter = logging.Formatter('[%(asctime)s] %(levelname)s [%(name)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 file_handler.setFormatter(file_formatter)
 
 # 2. 避免重复添加 Handler
@@ -70,10 +68,10 @@ def log_msg(level, module, message):
     1. 生成带颜色的字符串供控制台打印 (保持原有逻辑)
     2. 将纯净日志写入文件 (新增逻辑)
     """
-    timestamp = time.strftime("%H:%M:%S", time.localtime())
+    # 🔥 修改点 2：手动时间戳增加 %Y-%m-%d
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     
     # --- 写入文件 (使用 logging 模块) ---
-    # 我们把 module 放在 extra 里，或者直接拼接到 msg
     log_content = f"[{module}] {message}"
     if level == "INFO": logger.info(log_content)
     elif level == "WARN": logger.warning(log_content)

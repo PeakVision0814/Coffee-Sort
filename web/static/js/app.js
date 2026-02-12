@@ -283,7 +283,13 @@ function appendLog(msg, type='info') {
     const div = document.createElement('div');
     div.className = 'log-line';
     
-    const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
+    // 🔥 修改点：增加日期显示 (格式: YYYY-MM-DD HH:MM:SS)
+    const now = new Date();
+    // 手动拼接以保证格式统一 (或者使用 toLocaleString 并配置 options)
+    const dateStr = now.toLocaleDateString('zh-CN').replace(/\//g, '-');
+    const timeStr = now.toLocaleTimeString('en-GB', { hour12: false });
+    const fullTime = `${dateStr} ${timeStr}`;
+
     let colorClass = 'text-light';
     
     if (msg.includes('⚠️') || type === 'warn') colorClass = 'log-warn';
@@ -291,7 +297,7 @@ function appendLog(msg, type='info') {
     else if (msg.includes('🤖')) colorClass = 'log-sys';
     else if (type === 'success') colorClass = 'log-info';
 
-    div.innerHTML = `<span class="text-muted">[${time}]</span> <span class="${colorClass}">${msg}</span>`;
+    div.innerHTML = `<span class="text-muted">[${fullTime}]</span> <span class="${colorClass}">${msg}</span>`;
     
     terminal.appendChild(div);
     terminal.scrollTop = terminal.scrollHeight; // 自动滚动到底部
