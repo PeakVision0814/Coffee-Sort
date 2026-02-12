@@ -1,3 +1,13 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2026 Hangzhou Zhicheng Technology Co., Ltd. All rights reserved.
+# 
+# This code is proprietary and confidential.
+# Unauthorized copying of this file, via any medium is strictly prohibited.
+# 
+# System: Coffee Intelligent Sorting System
+# Author: Hangzhou Zhicheng Technology Co., Ltd
+# main.py
+
 import cv2
 import time
 import threading
@@ -5,6 +15,8 @@ import sys
 import os
 import webbrowser
 import random 
+import logging
+from logging.handlers import RotatingFileHandler
 
 from modules.vision import VisionSystem
 from modules.arm_control import ArmController
@@ -28,17 +40,57 @@ class SystemState:
 
 state = SystemState()
 
-# 随机语录库 (纯文字，无 emoji)
+# ==========================================
+# 📝 日志系统配置 (Log Rotation)
+# ==========================================
+LOG_FILE_PATH = os.path.join("logs", "system.log")
+
+# 确保 logs 文件夹存在
+if not os.path.exists("logs"):
+    os.makedirs("logs")
+
+# 配置 Logger
+logger = logging.getLogger("CoffeeSystem")
+logger.setLevel(logging.INFO)
+
+# 1. 文件处理器 (支持轮转：最大 2MB，保留 5 个备份)
+file_handler = RotatingFileHandler(
+    LOG_FILE_PATH, maxBytes=2*1024*1024, backupCount=5, encoding='utf-8'
+)
+# 设置文件中的日志格式 (去掉颜色代码，只留纯文本)
+file_formatter = logging.Formatter('[%(asctime)s] %(levelname)s [%(name)s] %(message)s', datefmt='%H:%M:%S')
+file_handler.setFormatter(file_formatter)
+
+# 2. 避免重复添加 Handler
+if not logger.handlers:
+    logger.addHandler(file_handler)
+
+def log_msg(level, module, message):
+    """
+    1. 生成带颜色的字符串供控制台打印 (保持原有逻辑)
+    2. 将纯净日志写入文件 (新增逻辑)
+    """
+    timestamp = time.strftime("%H:%M:%S", time.localtime())
+    
+    # --- 写入文件 (使用 logging 模块) ---
+    # 我们把 module 放在 extra 里，或者直接拼接到 msg
+    log_content = f"[{module}] {message}"
+    if level == "INFO": logger.info(log_content)
+    elif level == "WARN": logger.warning(log_content)
+    elif level == "ERROR": logger.error(log_content)
+    
+    # --- 返回控制台字符串 ---
+    return f"[{timestamp}] {level} [{module}] {message}"
+
+# 标准化成功消息库
 SUCCESS_PHRASES = [
-    "搞定，物品已移到{}号位。",
-    "执行完毕，{}号位已归位。",
-    "好了，东西已经放进{}号槽位了。",
-    "完成任务，{}号位现在是满的。",
-    "OK，物品已准确放入{}号位。"
+    "Task completed. Item placed in Slot {}.",
+    "Operation successful. Slot {} occupied.",
+    "Sort execution finished -> Slot {}.",
+    "Item stored in Slot {}. Returning to IDLE."
 ]
 
-def get_random_success_msg(slot_id):
-    # 🔥 修改：不再加 ✅，直接返回文字
+def get_standard_success_msg(slot_id):
     phrase = random.choice(SUCCESS_PHRASES).format(slot_id)
     return phrase 
 
@@ -48,18 +100,19 @@ def perform_pick_and_place(arm, target_slot, active_mode="SINGLE_TASK", restore_
         arm.pick()
         
         if state.mode == "IDLE" and restore_mode != "IDLE":
-            print(">>> [System] 检测到暂停")
+            print(log_msg("WARN", "System", "Interrupt detected during pick operation."))
             restore_mode = "IDLE"
 
         arm.place(target_slot)
         state.inventory[target_slot] = 1
         
         # 任务完成后，设置系统消息
-        state.system_msg = get_random_success_msg(target_slot)
-        print(f"✅ [System] {target_slot}号位 已满")
+        state.system_msg = get_standard_success_msg(target_slot)
+        print(log_msg("INFO", "System", f"Slot {target_slot} status updated: FULL"))
 
     except Exception as e:
-        state.system_msg = f"❌ 出错: {e}"
+        state.system_msg = f"❌ Error: {e}"
+        print(log_msg("ERROR", "System", f"Pick & Place failed: {e}"))
         arm.go_observe()
         restore_mode = "IDLE" 
     
@@ -96,21 +149,18 @@ def main():
     web_thread = threading.Thread(target=web_server.start_flask, args=(state, ai), daemon=True)
     web_thread.start()
 
-    print(">>> 🌐 Web 控制台已启动")
+    print(log_msg("INFO", "Web", "Console started at http://127.0.0.1:5000"))
     time.sleep(1.0)
     webbrowser.open("http://127.0.0.1:5000")
 
     try:
         while True:
-            # 🔥 修改点 1：移除心跳超时自动退出的逻辑
-            # 原代码: if time.time() - state.last_heartbeat > 3.0: break
-            
-            # 🔥 修改点 2：改为“心跳超时自动暂停”，但保持程序运行
+            # 心跳检测
             if state.mode != "IDLE" and (time.time() - state.last_heartbeat > 5.0):
-                print("⚠️ [System] 心跳丢失 (网页可能已关闭或后台挂起)，强制暂停机械臂")
+                print(log_msg("WARN", "System", "Heartbeat lost. Forcing IDLE mode."))
                 state.mode = "IDLE"
                 state.current_task = None
-                # 注意：这里不 break，程序继续跑，等你回来重连
+                state.system_msg = "⚠️ Connection lost. System paused."
 
             ret, frame = cap.read()
             if not ret: 
@@ -124,67 +174,67 @@ def main():
                 cmd_action = cmd.get('action')
                 cmd_type = cmd.get('type')
                 
-                print(f"🤖 [Main] CMD: {cmd}")
+                print(log_msg("INFO", "Main", f"Received CMD: {cmd}"))
 
                 if cmd_action == 'start':
                     if state.mode == "IDLE":
-                        # 🔥 修复：启动前强制先复位！
-                        # 只有当机械臂安全回到观测点后，才进入 AUTO 模式
-                        state.system_msg = "正在复位机械臂..."
+                        state.system_msg = "Initializing arm..."
                         arm.go_observe()
                         
                         state.mode = "AUTO"
                         state.current_task = None 
-                        state.system_msg = "流水线已启动，开始检测。"
+                        state.system_msg = "Auto-sorting pipeline started."
+                        print(log_msg("INFO", "System", "Mode switched to AUTO"))
                         
                 elif cmd_action == 'stop':
                     state.mode = "IDLE"
                     state.current_task = None
-                    state.system_msg = "系统已停止。"
+                    state.system_msg = "System stopped by user."
+                    print(log_msg("INFO", "System", "Mode switched to IDLE"))
                     
                 elif cmd_action == 'reset':
                     if state.mode in ["IDLE"]:
-                        # 这里的 arm.go_observe 现在已经包含了 power_on
                         arm.go_observe()
-                        state.system_msg = "机械臂已复位。"
+                        state.system_msg = "Arm reset completed."
                     else:
-                        state.system_msg = "作业中无法复位。"
+                        state.system_msg = "⚠️ Cannot reset while busy."
+                        
                 elif cmd_action == 'clear_all':
                     if state.mode in ["IDLE"]:
                         state.inventory = {i: 0 for i in range(1, 7)}
-                        # 🔥 修改：去掉 emoji
-                        state.system_msg = "库存已清空。"
+                        state.system_msg = "Inventory cleared."
+                        print(log_msg("INFO", "System", "Inventory reset to 0"))
                     else:
-                        state.system_msg = "作业中无法清空。"
+                        state.system_msg = "⚠️ Cannot clear inventory while busy."
+                        
                 elif cmd_action == 'scan':
-                    report = [f"{i}号{'满' if state.inventory[i] else '空'}" for i in range(1,7)]
-                    state.system_msg = "库存: " + ", ".join(report)
+                    report = [f"Slot{i}:{'FULL' if state.inventory[i] else 'EMPTY'}" for i in range(1,7)]
+                    state.system_msg = " | ".join(report)
+                    
                 elif cmd_type == 'inventory_update':
                     sid = cmd.get('slot_id')
                     sts = cmd.get('status')
                     if sid:
                         state.inventory[sid] = sts
-                        # 🔥 修改：去掉 emoji
-                        state.system_msg = f"已更新{sid}号位状态。"
+                        status_str = "FULL" if sts == 1 else "EMPTY"
+                        state.system_msg = f"Slot {sid} manually set to {status_str}."
+                        print(log_msg("INFO", "System", f"Manual update: Slot {sid} -> {status_str}"))
 
                 elif cmd_type == 'sort':
                     target_slot = cmd.get('slot_id')
                     target_color = cmd.get('color', 'any').lower()
                     
                     if target_slot and 1 <= target_slot <= 6:
-                        # 🔥 核心修改：双重检查库存状态
-                        # 即使 AI 发了指令，如果库存满了，这里坚决拦住
                         if state.inventory[target_slot] == 1:
-                            err_msg = f"⚠️ 拒绝执行：{target_slot}号位已满！"
-                            print(f"🛑 [System] {err_msg}")
+                            err_msg = f"⚠️ Operation denied: Slot {target_slot} is FULL."
+                            print(log_msg("WARN", "System", err_msg))
                             state.system_msg = err_msg
-                            # 不切换模式，直接结束本次指令处理
                         else:
                             state.current_task = {'slot': target_slot, 'color': target_color}
                             state.mode = "SORTING_TASK"
-                            print(f"🤖 [Task] 目标锁定: {target_color} -> {target_slot}")
+                            print(log_msg("INFO", "Task", f"Target locked: {target_color} -> Slot {target_slot}"))
                     else:
-                        state.system_msg = "⚠️ 无效槽位。"
+                        state.system_msg = "⚠️ Invalid slot ID."
 
                 state.pending_ai_cmd = None
 
@@ -206,7 +256,8 @@ def main():
                     time.sleep(0.5)
                 else:
                     state.mode = "IDLE"
-                    state.system_msg = "⚠️ 仓库已满，自动停止。"
+                    state.system_msg = "⚠️ Warehouse FULL. Auto-stop."
+                    print(log_msg("WARN", "System", "All slots full. Stopping pipeline."))
 
             elif state.mode == "SORTING_TASK" and (is_detected or fake_detect):
                 task = state.current_task
@@ -218,22 +269,25 @@ def main():
                 elif detected_color == target_color: is_match = True
                 
                 if is_match:
-                    print(f"🎯 匹配目标")
+                    print(log_msg("INFO", "Vision", f"Target match ({detected_color}). Executing sort."))
                     state.mode = "SINGLE_TASK"
                     t = threading.Thread(target=perform_pick_and_place, args=(arm, target_slot, "SINGLE_TASK", "IDLE"))
                     t.start()
                     state.current_task = None
                 else:
+                    # 缓冲逻辑保持不变，添加日志
                     buffer_slot = get_buffer_slot(reserved_slot=target_slot)
                     if buffer_slot:
-                        state.system_msg = f"移走{detected_color}挡路物品..."
+                        state.system_msg = f"Moving obstruction ({detected_color})..."
                         state.mode = "SINGLE_TASK"
                         t = threading.Thread(target=perform_pick_and_place, args=(arm, buffer_slot, "SINGLE_TASK", "SORTING_TASK"))
                         t.start()
+                        print(log_msg("INFO", "System", f"Buffering {detected_color} item to Slot {buffer_slot}"))
                     else:
                         state.mode = "IDLE"
-                        state.system_msg = "❌ 缓冲区满，任务终止。"
+                        state.system_msg = "❌ Buffer full. Task aborted."
                         state.current_task = None
+                        print(log_msg("ERROR", "System", "Buffer overflow. Cannot clear path."))
                 time.sleep(0.5)
             time.sleep(0.03)
 

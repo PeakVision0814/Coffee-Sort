@@ -10,126 +10,135 @@
 </head>
 <body class="d-flex flex-column h-100">
 
-<nav class="navbar navbar-dark shadow-sm flex-shrink-0">
-    <div class="container-fluid px-4">
-        <a class="navbar-brand fw-bold" href="#">
-            <i class="fas fa-robot me-2 text-info"></i>智能分拣系统 <span class="badge bg-dark border border-secondary ms-2" style="font-size: 0.6em">AI CORE V1.0</span>
+<nav class="navbar navbar-dark shadow-sm flex-shrink-0 py-2">
+    <div class="container-fluid px-3">
+        <a class="navbar-brand fw-bold fs-6" href="#">
+            <i class="fas fa-robot me-2 text-info"></i>智能分拣 <span class="badge bg-dark border border-secondary ms-2" style="font-size: 0.6em">V1.0</span>
         </a>
         <div class="d-flex text-white align-items-center">
-            <div class="me-4 d-flex align-items-center">
-                <button class="btn btn-outline-secondary btn-sm me-3 text-light" onclick="openSettings()">
-                    <i class="fas fa-sliders-h me-1"></i> 参数设置
+            <div class="me-3 d-flex align-items-center">
+                <button class="btn btn-outline-secondary btn-sm me-2 text-light" onclick="openSettings()" style="font-size: 0.8rem;">
+                    <i class="fas fa-sliders-h me-1"></i> 设置
                 </button>
             </div>
             <div>
-                <span id="sys-mode" class="badge bg-dark border border-secondary text-secondary">
-                    <i class="fas fa-wifi me-1"></i> 连接中...
+                <span id="sys-mode" class="badge bg-dark border border-secondary text-secondary" style="font-size: 0.8rem;">
+                    <i class="fas fa-wifi me-1"></i> ...
                 </span>
             </div>
         </div>
     </div>
 </nav>
 
-<div class="container-fluid flex-grow-1 d-flex flex-column p-4 overflow-hidden">
-    <div class="row h-100 g-4">
+<div class="container-fluid flex-grow-1 d-flex flex-column p-3 overflow-hidden">
+    <div class="row h-100 g-3">
         
         <div class="col-lg-8 d-flex flex-column h-100">
-            <div class="card shadow h-100 d-flex flex-column ai-panel">
-                <div class="card-header border-bottom py-3 d-flex justify-content-between align-items-center">
-                    <div>
-                        <h6 class="mb-0 fw-bold text-white"><i class="fas fa-terminal me-2 text-info"></i>任务指令终端</h6>
-                        <small class="text-muted" style="font-size: 0.75rem;">
-                            MODEL: <span id="current-model-display" class="text-info">LOADING...</span>
-                        </small>
-                    </div>
-                    <div>
-                        <span id="ai-status-badge" class="badge bg-success bg-opacity-10 text-success border border-success">
-                            <i class="fas fa-circle me-1" style="font-size: 0.5rem;"></i>AI ONLINE
-                        </span>
-                    </div>
-                </div>
-                
-                <div id="chat-box" class="card-body chat-container flex-grow-1 overflow-auto p-4 d-flex flex-column">
-                    <div class="chat-message msg system mx-auto mb-4">
-                        <i class="fas fa-check-circle me-1"></i> 系统核心已加载。请下达指令。
-                    </div>
-                </div>
-                
-                <div class="card-footer border-top p-3">
-                    <div class="d-flex align-items-center">
-                        <button class="btn btn-outline-secondary" type="button" id="btn-mic" onclick="toggleSpeechRecognition()" title="点击开始语音指令">
-                            <i class="fas fa-microphone"></i>
-                        </button>
-
-                        <div class="input-group input-group-lg flex-grow-1">
-                            <input type="text" id="user-input" class="form-control border-0 ps-3" 
-                                placeholder="输入自然语言指令 (如: 把红色的拿走)..." onkeypress="handleEnter(event)">
-                            <button class="btn btn-info text-white fw-bold" id="btn-send" onclick="sendChat()">
-                                发送 <i class="fas fa-location-arrow ms-2"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="form-text mt-2 ps-2 d-flex justify-content-between" style="font-size: 0.8rem;">
-                        <span id="voice-status" class="text-info" style="height: 20px;"></span>
-                        <span class="text-muted">支持语音/文字多模态交互</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-lg-4 d-flex flex-column gap-3">
             
-            <div class="card shadow-sm border-0 bg-black">
-                <div class="card-body p-0 position-relative monitor-frame" style="min-height: 240px;">
-                    <img src="/video_feed" class="img-fluid opacity-90" alt="Camera Feed">
-                    <div class="position-absolute top-0 start-0 p-2">
-                        <span class="badge bg-danger bg-opacity-75 animate-pulse">LIVE</span>
+            <div class="card shadow-sm flex-shrink-0 mb-3" style="background-color: #1e293b;">
+                <div class="card-body py-2 px-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <small class="fw-bold text-muted text-uppercase" style="font-size: 0.7rem;">Real-time Inventory</small>
+                        <span class="badge bg-dark border border-secondary text-muted" style="font-size: 0.6em;">6 SLOTS</span>
                     </div>
-                    <div class="position-absolute bottom-0 end-0 p-2 text-white-50" style="font-size: 0.7rem; font-family: monospace;">
-                        CAM_01: 1920x1080 @ 30FPS
-                    </div>
-                </div>
-            </div>
-
-            <div class="card shadow-sm flex-grow-0">
-                <div class="card-header py-2">
-                    <small class="fw-bold text-muted text-uppercase">Inventory Status</small>
-                </div>
-                <div class="card-body py-3">
                     <div class="row g-2" id="inventory-grid">
                         </div>
                 </div>
             </div>
 
-            <div class="card shadow-sm flex-grow-1">
-                <div class="card-header py-2">
-                    <small class="fw-bold text-muted text-uppercase">Manual Override</small>
+            <div class="card shadow h-100 d-flex flex-column ai-panel flex-grow-1" style="min-height: 0;">
+                <div class="card-header border-bottom py-2 d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="mb-0 fw-bold text-white"><i class="fas fa-terminal me-2 text-info"></i>指令终端</h6>
+                    </div>
+                    <div>
+                        <small class="text-muted me-2" style="font-size: 0.75rem;">MODEL: <span id="current-model-display" class="text-info">...</span></small>
+                        <span id="ai-status-badge" class="badge bg-success bg-opacity-10 text-success border border-success">
+                            AI ONLINE
+                        </span>
+                    </div>
                 </div>
-                <div class="card-body d-flex flex-column justify-content-center">
-                    
-                    <button id="btn-main-toggle" class="btn btn-success btn-lg w-100 mb-3 py-3 fw-bold shadow-lg" onclick="toggleSystemMode()">
-                        <i class="fas fa-power-off me-2"></i> 启动自动分拣
-                    </button>
+                
+                <div id="chat-box" class="card-body chat-container flex-grow-1 overflow-auto p-3 d-flex flex-column">
+                    <div class="chat-message msg system mx-auto mb-4">
+                        <i class="fas fa-check-circle me-1"></i> 系统核心已加载。
+                    </div>
+                </div>
+                
+                <div class="card-footer border-top p-2">
+                    <div class="d-flex align-items-center">
+                        <button class="btn btn-outline-secondary" type="button" id="btn-mic" onclick="toggleSpeechRecognition()" title="语音指令">
+                            <i class="fas fa-microphone"></i>
+                        </button>
 
-                    <div class="row g-2">
-                        <div class="col-6">
-                            <button class="btn btn-outline-secondary w-100" onclick="sendCommand('reset')">
-                                <i class="fas fa-sync me-1"></i> 复位
-                            </button>
-                        </div>
-                        <div class="col-6">
-                            <button class="btn btn-outline-danger w-100" onclick="sendCommand('clear_all')">
-                                <i class="fas fa-trash-alt me-1"></i> 清空
+                        <div class="input-group flex-grow-1 ms-2">
+                            <input type="text" id="user-input" class="form-control border-0 ps-3" 
+                                style="height: 42px;" placeholder="输入指令..." onkeypress="handleEnter(event)">
+                            <button class="btn btn-info text-white fw-bold" id="btn-send" onclick="sendChat()">
+                                <i class="fas fa-paper-plane"></i>
                             </button>
                         </div>
                     </div>
-                    
-                    <div class="mt-3 text-center">
-                        <small class="text-muted" id="status-text">
-                            <i class="fas fa-circle-notch fa-spin me-1"></i> System Idle
-                        </small>
+                    <div class="form-text mt-1 ps-2 d-flex justify-content-between" style="font-size: 0.75rem; margin-bottom: 0;">
+                        <span id="voice-status" class="text-info" style="height: 18px;"></span>
+                        <span class="text-muted">READY</span>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4 d-flex flex-column h-100" style="overflow-y: auto;">
+            <div class="d-flex flex-column gap-3 h-100">
+                
+                <div class="card shadow-sm border-0 bg-black flex-shrink-0">
+                    <div class="card-body p-0 position-relative monitor-frame">
+                        <img src="/video_feed" class="img-fluid opacity-90" alt="Camera Feed">
+                        <div class="position-absolute top-0 start-0 p-2">
+                            <span class="badge bg-danger bg-opacity-75 animate-pulse">LIVE</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card shadow-sm flex-grow-1" style="min-height: 150px; background-color: #000; border: 1px solid #334155;">
+                    <div class="card-header py-1 bg-dark border-secondary">
+                        <div class="d-flex justify-content-between">
+                            <small class="fw-bold text-success font-monospace" style="font-size: 0.7rem;">> SYSTEM LOG</small>
+                            <small class="text-muted" style="cursor: pointer;" onclick="clearLogs()"><i class="fas fa-eraser"></i></small>
+                        </div>
+                    </div>
+                    <div class="card-body p-2 overflow-auto" id="log-terminal" style="font-family: 'Consolas', 'Courier New', monospace; font-size: 0.75rem; color: #0f0;">
+                        <div class="log-line"><span class="text-muted">[INIT]</span> System initialized...</div>
+                    </div>
+                </div>
+
+                <div class="card shadow-sm flex-shrink-0">
+                    <div class="card-header py-1">
+                        <small class="fw-bold text-muted" style="font-size: 0.7rem;">CONTROL</small>
+                    </div>
+                    <div class="card-body d-flex flex-column justify-content-center py-3">
+                        <button id="btn-main-toggle" class="btn btn-success w-100 mb-2 py-3 fw-bold shadow-lg" onclick="toggleSystemMode()">
+                            <i class="fas fa-power-off me-2"></i> 启动自动分拣
+                        </button>
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <button class="btn btn-outline-secondary w-100 py-2" onclick="sendCommand('reset')">
+                                    <i class="fas fa-sync me-1"></i> 复位
+                                </button>
+                            </div>
+                            <div class="col-6">
+                                <button class="btn btn-outline-danger w-100 py-2" onclick="sendCommand('clear_all')">
+                                    <i class="fas fa-trash-alt me-1"></i> 清空
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mt-2 text-center">
+                            <small class="text-muted" id="status-text" style="font-size: 0.75rem;">
+                                <i class="fas fa-circle-notch fa-spin me-1"></i> Idle
+                            </small>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
     </div>

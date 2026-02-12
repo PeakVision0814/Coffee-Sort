@@ -249,12 +249,9 @@ function initInventoryGrid() {
     container.innerHTML = '';
     for (let i = 1; i <= 6; i++) {
         container.innerHTML += `
-            <div class="col-4">
-                <div class="slot-box" id="slot-${i}">
-                    <div class="d-flex flex-column">
-                        <span class="slot-number">#${i}</span>
-                        <span class="slot-text">EMPTY</span>
-                    </div>
+            <div class="col-2">
+                <div class="slot-box" id="slot-${i}" title="${i}号槽位">
+                    <span class="slot-number">#${i}</span>
                     <i class="fas fa-box-open slot-icon"></i>
                 </div>
             </div>`;
@@ -265,25 +262,71 @@ function updateInventory(inventory) {
     for (let i = 1; i <= 6; i++) {
         const el = document.getElementById(`slot-${i}`);
         const icon = el.querySelector('.slot-icon');
-        const text = el.querySelector('.slot-text');
         
         const isFull = inventory[i] === 1;
         
         if (isFull) {
-            // 状态改变：已满
             el.className = 'slot-box slot-full';
-            icon.className = 'fas fa-cube slot-icon'; // 实心盒子图标
-            text.innerText = 'FULL';
+            icon.className = 'fas fa-cube slot-icon';
         } else {
-            // 状态改变：空闲
             el.className = 'slot-box';
-            icon.className = 'fas fa-box-open slot-icon'; // 空盒子图标
-            text.innerText = 'EMPTY';
+            icon.className = 'fas fa-box-open slot-icon';
         }
     }
 }
 
-// ... (sendCommand, openSettings 等保持不变) ...
+// 🔥 核心修改 2：新增日志处理
+function appendLog(msg, type='info') {
+    const terminal = document.getElementById('log-terminal');
+    if (!terminal) return;
+
+    const div = document.createElement('div');
+    div.className = 'log-line';
+    
+    const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
+    let colorClass = 'text-light';
+    
+    if (msg.includes('⚠️') || type === 'warn') colorClass = 'log-warn';
+    else if (msg.includes('❌') || type === 'error') colorClass = 'log-err';
+    else if (msg.includes('🤖')) colorClass = 'log-sys';
+    else if (type === 'success') colorClass = 'log-info';
+
+    div.innerHTML = `<span class="text-muted">[${time}]</span> <span class="${colorClass}">${msg}</span>`;
+    
+    terminal.appendChild(div);
+    terminal.scrollTop = terminal.scrollHeight; // 自动滚动到底部
+}
+
+function clearLogs() {
+    document.getElementById('log-terminal').innerHTML = '<div class="log-line"><span class="text-muted">[SYS]</span> Logs cleared.</div>';
+}
+
+function fetchStatus() {
+    fetch('/status')
+        .then(res => res.json())
+        .then(data => {
+            if(data.mode === "OFFLINE") return;
+            
+            updateInventory(data.inventory);
+            
+            // 🔥 核心修改 3：系统消息不再进聊天框，而是进 Log
+            if (data.system_msg) {
+                appendLog(data.system_msg, 'sys');
+            }
+
+            // 更新 Badge
+            const badge = document.getElementById('sys-mode');
+            if (isSystemBusy()) {
+                badge.innerHTML = '<i class="fas fa-bolt text-warning me-1"></i> WORKING';
+                badge.className = "badge bg-dark border border-warning text-warning";
+            } else {
+                badge.innerHTML = '<i class="fas fa-check text-success me-1"></i> ONLINE';
+                badge.className = "badge bg-dark border border-success text-success";
+            }
+            
+            updateUIState(data.mode);
+        }).catch(err => {});
+}
 function sendCommand(action) {
     fetch('/command', {
         method: 'POST',
@@ -425,5 +468,49 @@ function toggleSpeechRecognition() {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
+    initInventoryGrid();
+    settingsModal = new bootstrap.Modal(document.getElementById('settingsModal'));
+    
+    loadHistoryLogs(); // 🔥 新增：加载历史日志
+    
+    setInterval(fetchStatus, 1000);
+    setInterval(sendHeartbeat, 1000);
+    refreshModelDisplay();
     initSpeech();
 });
+
+// 🔥 新增：加载历史日志函数
+function loadHistoryLogs() {
+    fetch('/api/logs')
+        .then(res => res.json())
+        .then(data => {
+            const terminal = document.getElementById('log-terminal');
+            if (!terminal || !data.logs) return;
+
+            // 清空初始的 [INIT] 消息 (可选)
+            terminal.innerHTML = ''; 
+
+            data.logs.forEach(line => {
+                const div = document.createElement('div');
+                div.className = 'log-line';
+                
+                // 简单的颜色高亮解析
+                if (line.includes('WARN')) div.className += ' log-warn';
+                else if (line.includes('ERROR')) div.className += ' log-err';
+                else if (line.includes('[System]')) div.className += ' log-sys';
+                else div.className += ' text-light'; // 默认白色/浅灰
+
+                div.innerText = line; // 使用 innerText 防止 XSS，且日志本身是纯文本
+                terminal.appendChild(div);
+            });
+            
+            // 插入一条分割线，区分历史和当前
+            const sep = document.createElement('div');
+            sep.className = 'log-line text-muted text-center my-2';
+            sep.innerText = '--- History Loaded ---';
+            terminal.appendChild(sep);
+
+            terminal.scrollTop = terminal.scrollHeight;
+        })
+        .catch(err => console.error("无法加载历史日志", err));
+}

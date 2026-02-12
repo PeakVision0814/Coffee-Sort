@@ -21,12 +21,12 @@ except ImportError:
 
 class ArmController:
     def __init__(self):
-        print(f">>> [Arm] 初始化驱动 (端口: {settings.PORT})...")
+        print(f"[INIT] [Arm] Initializing driver on port {settings.PORT}...")
         self.mc = None
         self.is_connected = False
 
         if settings.SIMULATION_MODE:
-            print("⚠️ 仿真模式")
+            print("[WARN] [Arm] Running in SIMULATION MODE.")
             return
 
         try:
@@ -48,14 +48,14 @@ class ArmController:
             # 4. 测试通讯
             angles = self.mc.get_angles()
             if angles:
-                print(f"✅ [Arm] 连接成功，当前角度: {angles}")
+                print(f"[INFO] [Arm] Connected successfully. Angles: {angles}")
                 self.is_connected = True
                 self.mc.set_color(0, 255, 0)
             else:
-                print("❌ [Arm] 串口打开但读取失败")
+                print("[ERROR] [Arm] Port opened but read failed.")
                 
         except Exception as e:
-            print(f"❌ [Arm] 连接异常: {e}")
+            print(f"[ERROR] [Arm] Connection failed: {e}")
 
     # --- 核心工具 ---
     def move_to_angles(self, angles, speed, delay_time):
@@ -65,56 +65,48 @@ class ArmController:
             self.mc.send_angles(angles, speed)
             time.sleep(delay_time)
         except Exception as e:
-            print(f"⚠️ 移动指令发送失败: {e}")
+            print(f"[ERROR] [Arm] Move command failed: {e}")
 
     # --- 业务动作 ---
 
     def go_observe(self):
-        """
-        前往抓取观测点 (安全复位)
-        🔥 修复：增加强制上电逻辑，解决待机垂落后无法复位的问题
-        """
+        """前往抓取观测点 (安全复位)"""
         if not self.is_connected: return
         
-        print(">>> [Arm] 🔄 正在唤醒并归位...")
+        print("[INFO] [Arm] Executing safe reset (observe pose)...")
         try:
             # 1. 强制上电 (Torque On)
-            # 防止机械臂因长时间待机掉电，或者此时正处于下垂状态
             self.mc.power_on()
-            time.sleep(0.5) # 给一点时间充能锁死舵机
+            time.sleep(0.5) 
             
             # 2. 发送归位指令
             target = settings.PICK_POSES["observe"]
-            # 稍微给多一点时间(2.0s)，因为如果从趴着的状态起来，路程较长
             self.move_to_angles(target, self.speed, 2.0) 
             
-            print(">>> [Arm] ✅ 已安全归位")
+            print("[INFO] [Arm] Reset complete.")
         except Exception as e:
-            print(f"❌ 归位失败: {e}")
+            print(f"[ERROR] [Arm] Reset failed: {e}")
 
     def pick(self):
         """执行抓取流程"""
         if not self.is_connected: return
-        print(f"🤖 [Arm] 执行抓取")
+        print(f"[INFO] [Arm] Sequence START: Pick Operation")
 
-        # 为了安全，抓取前其实也可以再次确保上电，但 go_observe 已经做了
-        # 这里保持高效，不再重复 power_on，除非发现经常抓取失败
-
-        pose_high = settings.PICK_POSES["observe"] # 高位
-        pose_low  = settings.PICK_POSES["grab"]    # 低位
+        pose_high = settings.PICK_POSES["observe"] 
+        pose_low  = settings.PICK_POSES["grab"]    
         
         # 1. 下抓
-        print("   1️⃣ 下探抓取")
+        # print("   1️⃣ Approach Target") # 可选：保留数字步骤，或改为英文日志
         self.mc.set_gripper_value(100, 70) 
         self.move_to_angles(pose_low, self.speed, 1.2)
         
         # 2. 闭合
-        print("   2️⃣ 闭合夹爪")
+        # print("   2️⃣ Close Gripper")
         self.mc.set_gripper_value(10, 70)
         time.sleep(0.8)
 
         # 3. 抬起
-        print("   3️⃣ 抬起")
+        # print("   3️⃣ Lift Object")
         self.move_to_angles(pose_high, self.speed, 1.0)
 
     def place(self, slot_id):
@@ -123,30 +115,27 @@ class ArmController:
         
         rack_data = settings.STORAGE_RACKS.get(slot_id)
         if not rack_data:
-            print(f"❌ 无效槽位: {slot_id}")
+            print(f"[ERROR] [Arm] Invalid slot ID: {slot_id}")
             return
 
-        print(f"🤖 [Arm] 执行放置 -> {slot_id}号位")
+        print(f"[INFO] [Arm] Sequence START: Place -> Slot {slot_id}")
         
         pose_high = rack_data["high"]
         pose_low  = rack_data["low"]
 
         # 1. 移动到槽位上方 (High)
-        print("   4️⃣ 移动到槽位上方")
         self.move_to_angles(pose_high, self.speed, 2.0) 
 
         # 2. 下放 (Low)
-        print("   5️⃣ 下放")
         self.move_to_angles(pose_low, self.speed, 1.2)
 
         # 3. 松开
-        print("   6️⃣ 松开")
         self.mc.set_gripper_value(100, 70)
         time.sleep(0.5) 
 
         # 4. 抬起 (High)
-        print("   7️⃣ 抬起离开")
         self.move_to_angles(pose_high, self.speed, 1.0)
 
         # 5. 归位
         self.go_observe()
+        print(f"[INFO] [Arm] Sequence COMPLETE.")

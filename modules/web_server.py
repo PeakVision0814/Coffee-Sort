@@ -64,6 +64,26 @@ def handle_settings():
         except Exception as e:
             return jsonify({"status": "error", "msg": str(e)}), 500
 
+@app.route('/api/logs', methods=['GET'])
+def get_logs():
+    log_path = os.path.join(root_dir, 'logs', 'system.log')
+    if not os.path.exists(log_path):
+        return jsonify({"logs": []})
+    
+    try:
+        # 读取最后 100 行
+        with open(log_path, 'r', encoding='utf-8') as f:
+            # 简单粗暴的方法：读取所有行取最后100行
+            # 对于2MB的文件，这完全没有性能问题
+            lines = f.readlines()
+            last_lines = lines[-100:] 
+            
+        # 清洗数据：去掉换行符
+        clean_logs = [line.strip() for line in last_lines]
+        return jsonify({"logs": clean_logs})
+    except Exception as e:
+        return jsonify({"logs": [f"Error reading logs: {str(e)}"]})
+
 # 🔥 核心修改：流式聊天接口
 @app.route('/chat', methods=['POST'])
 def chat():

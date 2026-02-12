@@ -60,30 +60,60 @@ body {
     z-index: 2; background-size: 100% 2px, 3px 100%; pointer-events: none;
 }
 
-/* 库存图标 */
+/* ... 前面的全局变量等保持不变 ... */
+
+/* =========================================
+   📦 库存网格 (水平布局优化)
+   ========================================= */
 .slot-box {
     background-color: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--panel-border);
-    border-radius: 8px;
-    height: 70px;
-    display: flex; justify-content: space-between; align-items: center; padding: 0 15px;
+    border-radius: 6px;
+    height: 50px; /* 高度减小 */
+    display: flex; 
+    flex-direction: row; /* 横向排列 */
+    justify-content: center; 
+    align-items: center;
+    gap: 8px; /* 元素间距 */
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative; overflow: hidden;
+    cursor: default;
 }
-.slot-number { font-size: 0.9rem; color: var(--text-muted); font-weight: bold; }
-.slot-icon { font-size: 1.5rem; color: #475569; transition: all 0.3s; }
-.slot-text { font-size: 0.8rem; font-weight: 600; color: var(--text-muted); }
 
+.slot-number { font-size: 0.8rem; color: var(--text-muted); font-weight: bold; position: absolute; left: 5px; top: 2px; font-size: 0.6rem; }
+.slot-icon { font-size: 1.2rem; color: #475569; transition: all 0.3s; }
+.slot-text { display: none; } /* 空间太小，不显示 EMPTY/FULL 文字，只靠颜色和图标 */
+
+/* 已满状态 */
 .slot-full {
-    background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(245, 158, 11, 0.05) 100%);
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(245, 158, 11, 0.1) 100%);
     border-color: var(--accent-warn);
-    transform: scale(1.02);
-    box-shadow: 0 0 10px rgba(245, 158, 11, 0.2);
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
 }
-.slot-full .slot-icon { color: var(--accent-warn); transform: scale(1.2); }
-.slot-full .slot-text { color: var(--accent-warn); }
-.slot-full::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--accent-warn); }
+.slot-full .slot-icon { color: var(--accent-warn); transform: scale(1.1); }
+.slot-full .slot-number { color: var(--accent-warn); }
 
+/* =========================================
+   📟 日志终端 (Log Terminal)
+   ========================================= */
+#log-terminal {
+    background: #000;
+    scrollbar-width: thin;
+    scrollbar-color: #333 #000;
+}
+.log-line {
+    margin-bottom: 2px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    padding-bottom: 2px;
+    word-wrap: break-word;
+}
+/* 不同类型的日志颜色 */
+.log-info { color: #10b981; }  /* 绿色 */
+.log-warn { color: #f59e0b; }  /* 黄色 */
+.log-err { color: #ef4444; }   /* 红色 */
+.log-sys { color: #06b6d4; }   /* 青色 */
+
+/* ... 其他聊天、监控 CSS 保持不变 ... */
 /* =========================================
    💬 聊天区域 (Bubble Style 优化版)
    ========================================= */
