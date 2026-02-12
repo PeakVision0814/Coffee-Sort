@@ -21,6 +21,8 @@ class AIDecisionMaker:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.config_path = os.path.join(base_dir, "config", "ai_config.json")
         self.config = {}
+        self.history = []
+        self.max_history = 10 # 最近 5 轮对话 (5条user + 5条assistant)
         self.load_config()
         print(f">>> [AI] 决策模块已就绪 (模型: {self.config.get('model_name', 'Unknown')})")
 
@@ -32,24 +34,23 @@ class AIDecisionMaker:
         except Exception as e:
             print(f"❌ [AI] 配置读取失败: {e}")
 
-    # 🔥 修改点：增加 inventory 参数
+    def _clean_response_for_history(self, text):
+        """🔥 核心优化：剥离 JSON 块，节省历史记录 Token"""
+        # 移除 ```json ... ``` 及其内部所有内容
+        clean_text = re.sub(r'```json\s*.*?```', '', text, flags=re.DOTALL)
+        # 移除可能残余的空行
+        return clean_text.strip()
+
     def process_text_stream(self, user_input, inventory=None):
-        """
-        流式处理核心
-        """
         self.load_config()
         print(f"👂 [AI] 收到指令: '{user_input}'")
-
-        if SIMULATION_MODE:
-            yield "⚠️ 模拟模式回复: " + user_input
-            return
 
         api_key = self.config.get("api_key", "")
         base_url = self.config.get("base_url", "https://api.deepseek.com")
         model_name = self.config.get("model_name", "deepseek-chat")
         system_prompt = self.config.get("system_prompt", "")
 
-        # 🔥 核心增强：构建动态的库存状态提示
+        # 1. 构建当前库存状态 (不存入 history，仅作为当前上下文)
         status_prompt = ""
         if inventory:
             status_list = []
@@ -57,17 +58,18 @@ class AIDecisionMaker:
                 status = "【已满】" if inventory.get(i) == 1 else "空闲"
                 status_list.append(f"{i}号{status}")
             status_str = ", ".join(status_list)
-            
-            # 🔥 修改这里：把警告语写得更直白、更严厉
-            status_prompt = (
-                f"\n[系统实时数据]: {status_str}\n"
-                f"⚠️ 重要安全规则：\n"
-                f"1. 如果用户要求的槽位显示【已满】，你必须拒绝！\n"
-                f"2. 严禁擅自更换槽位！例如用户说3号，3号满了，你就报错，绝对不能自作主张放到1号！\n"
-                f"3. 拒绝时，不要输出任何 JSON 代码块。\n"
-            )
+            status_prompt = f"[当前实时库存]: {status_str}\n"
 
-        final_user_input = f"{status_prompt}\n用户指令: {user_input}"
+        # 2. 准备本次请求的消息列表
+        # 消息结构：System Prompt + 历史记忆 + 当前库存及输入
+        messages = [{"role": "system", "content": system_prompt}]
+        
+        # 加入历史记录
+        messages.extend(self.history)
+        
+        # 加入当前最新的输入 (带上实时库存)
+        current_user_content = f"{status_prompt}用户指令: {user_input}"
+        messages.append({"role": "user", "content": current_user_content})
 
         if not api_key:
             yield "❌ API Key 未配置。"
@@ -75,22 +77,29 @@ class AIDecisionMaker:
 
         try:
             client = OpenAI(api_key=api_key, base_url=base_url)
-            
             response = client.chat.completions.create(
                 model=model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": final_user_input}, # 使用带库存信息的输入
-                ],
+                messages=messages,
                 temperature=0.1,
-                max_tokens=500,
                 stream=True 
             )
 
+            full_reply = ""
             for chunk in response:
                 if chunk.choices[0].delta.content is not None:
                     text_chunk = chunk.choices[0].delta.content
+                    full_reply += text_chunk
                     yield text_chunk
+
+            # 🔥 3. 对话结束后，更新滑动窗口记忆
+            # 记录用户原始输入 (不带库存提示，节省空间)
+            self.history.append({"role": "user", "content": user_input})
+            # 记录 AI 清理后的回复 (不带 JSON)
+            self.history.append({"role": "assistant", "content": self._clean_response_for_history(full_reply)})
+            
+            # 裁剪历史记录
+            if len(self.history) > self.max_history:
+                self.history = self.history[-self.max_history:]
 
         except Exception as e:
             yield f"❌ AI 调用出错: {str(e)}"
