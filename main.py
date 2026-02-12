@@ -213,13 +213,26 @@ def main():
                     
                 elif cmd_type == 'inventory_update':
                     sid = cmd.get('slot_id')
-                    sts = cmd.get('status')
-                    if sid:
+                    sts = cmd.get('status') # 0 代表空，1 代表满
+                    
+                    # 🔥 新增逻辑：处理 "所有" (slot_id = 0)
+                    if sid == 0:
+                        # 循环更新所有槽位
+                        for i in range(1, 7):
+                            state.inventory[i] = sts
+                        
+                        status_str = "FULL" if sts == 1 else "EMPTY"
+                        msg = f"Manual override: ALL SLOTS set to {status_str}."
+                        state.system_msg = msg
+                        print(log_msg("INFO", "System", msg))
+                        
+                    # 原有逻辑：处理单个槽位
+                    elif sid in state.inventory:
                         state.inventory[sid] = sts
                         status_str = "FULL" if sts == 1 else "EMPTY"
-                        state.system_msg = f"Slot {sid} manually set to {status_str}."
+                        state.system_msg = f"Manual update: Slot {sid} -> {status_str}."
                         print(log_msg("INFO", "System", f"Manual update: Slot {sid} -> {status_str}"))
-
+                        
                 elif cmd_type == 'sort':
                     target_slot = cmd.get('slot_id')
                     target_color = cmd.get('color', 'any').lower()
