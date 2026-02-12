@@ -198,11 +198,6 @@ def command():
     if not system_state: return jsonify({"status": "error"})
     action = request.json.get('action')
     print(f"🔘 [Web] 按钮点击: {action}")
-
-    if action in ['reset', 'stop', 'clear_all']:
-        if ai_module:
-            ai_module.history = []
-            print("🧠 [AI] 记忆已随系统操作重置")
     
     # 构建指令列表
     cmd_list = []

@@ -1,12 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2026 Hangzhou Zhicheng Technology Co., Ltd. All rights reserved.
-# 
-# This code is proprietary and confidential.
-# Unauthorized copying of this file, via any medium is strictly prohibited.
-# 
-# System: Coffee Intelligent Sorting System
-# Author: Hangzhou Zhicheng Technology Co., Ltd
-# modules\arm_control.py
+# modules/arm_control.py
 
 import time
 import sys
@@ -39,8 +32,10 @@ class ArmController:
                 self.mc.power_on()
                 time.sleep(0.5)
             
-            # 3. 初始状态
-            self.mc.set_gripper_value(100, 70) # 张开
+            # 3. 🔥 初始状态：松开气爪 (G2=1 为松开/停止)
+            self.gripper_open()
+            # 🔥 初始状态：PLC 信号置低 (G5=0)
+            self.set_plc_signal(False)
             
             # 速度设置
             self.speed = 80
@@ -57,9 +52,31 @@ class ArmController:
         except Exception as e:
             print(f"[ERROR] [Arm] Connection failed: {e}")
 
+    # --- 🔥 新增：气爪与 PLC 控制 ---
+    def gripper_open(self):
+        """松开气爪 (G2 高电平)"""
+        if self.is_connected:
+            # 假设 0 是闭合 (断开继电器)
+            self.mc.set_basic_output(settings.GPIO_GRIPPER, 0)
+            time.sleep(0.3)
+
+    def gripper_close(self):
+        """闭合气爪 (G2 低电平)"""
+        if self.is_connected:
+            # 假设 0 是张开 (吸合继电器)
+            self.mc.set_basic_output(settings.GPIO_GRIPPER, 1)
+            time.sleep(0.3)
+
+    def set_plc_signal(self, active: bool):
+        """给 PLC 发送完成信号 (G5)"""
+        if self.is_connected:
+            # active=True 发送高电平(1)，False 发送低电平(0)
+            # 具体电平逻辑取决于 PLC 是 PNP 还是 NPN，这里假设高电平有效
+            val = 1 if active else 0
+            self.mc.set_basic_output(settings.GPIO_PLC_SIGNAL, val)
+
     # --- 核心工具 ---
     def move_to_angles(self, angles, speed, delay_time):
-        """最稳健的移动方式：发送角度 -> 等待"""
         if not self.is_connected: return
         try:
             self.mc.send_angles(angles, speed)
@@ -70,47 +87,40 @@ class ArmController:
     # --- 业务动作 ---
 
     def go_observe(self):
-        """前往抓取观测点 (安全复位)"""
         if not self.is_connected: return
-        
         print("[INFO] [Arm] Executing safe reset (observe pose)...")
         try:
-            # 1. 强制上电 (Torque On)
             self.mc.power_on()
-            time.sleep(0.5) 
-            
-            # 2. 发送归位指令
+            time.sleep(0.5)
             target = settings.PICK_POSES["observe"]
             self.move_to_angles(target, self.speed, 2.0) 
-            
             print("[INFO] [Arm] Reset complete.")
         except Exception as e:
             print(f"[ERROR] [Arm] Reset failed: {e}")
 
     def pick(self):
-        """执行抓取流程"""
+        """执行抓取流程 (已适配气爪)"""
         if not self.is_connected: return
         print(f"[INFO] [Arm] Sequence START: Pick Operation")
 
         pose_high = settings.PICK_POSES["observe"] 
         pose_low  = settings.PICK_POSES["grab"]    
         
-        # 1. 下抓
-        # print("   1️⃣ Approach Target") # 可选：保留数字步骤，或改为英文日志
-        self.mc.set_gripper_value(100, 70) 
+        # 1. 确保气爪松开
+        self.gripper_open()
+        
+        # 2. 下抓
         self.move_to_angles(pose_low, self.speed, 1.2)
         
-        # 2. 闭合
-        # print("   2️⃣ Close Gripper")
-        self.mc.set_gripper_value(10, 70)
-        time.sleep(0.8)
+        # 3. 闭合气爪 (抓取)
+        self.gripper_close()
+        time.sleep(0.5) # 等待气压稳定
 
-        # 3. 抬起
-        # print("   3️⃣ Lift Object")
+        # 4. 抬起
         self.move_to_angles(pose_high, self.speed, 1.0)
 
     def place(self, slot_id):
-        """放置到槽位"""
+        """放置到槽位 (已适配气爪 + PLC信号)"""
         if not self.is_connected: return
         
         rack_data = settings.STORAGE_RACKS.get(slot_id)
@@ -129,13 +139,19 @@ class ArmController:
         # 2. 下放 (Low)
         self.move_to_angles(pose_low, self.speed, 1.2)
 
-        # 3. 松开
-        self.mc.set_gripper_value(100, 70)
+        # 3. 松开气爪 (放置)
+        self.gripper_open()
         time.sleep(0.5) 
 
         # 4. 抬起 (High)
         self.move_to_angles(pose_high, self.speed, 1.0)
 
-        # 5. 归位
+        # 5. 🔥 给 PLC 发送完成信号 (脉冲)
+        print("[INFO] [Arm] Sending PLC Finish Signal...")
+        self.set_plc_signal(True)  # ON
+        time.sleep(0.5)            # 保持 0.5 秒
+        self.set_plc_signal(False) # OFF
+
+        # 6. 归位
         self.go_observe()
         print(f"[INFO] [Arm] Sequence COMPLETE.")
