@@ -19,7 +19,7 @@ class VisionSystem:
         self.base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         self.config_dir = os.path.join(self.base_dir, config_dir)
         
-        # 2. 加载相机内参 (保留，用于去畸变)
+        # 2. 加载相机内参 (用于去畸变)
         matrix_path = os.path.join(self.config_dir, "camera_matrix.npz")
         if os.path.exists(matrix_path):
             data = np.load(matrix_path)
@@ -31,7 +31,7 @@ class VisionSystem:
             self.mtx = None
             self.dist = None
 
-        # 3. 🔥 加载 ROI 配置文件 (你刚刚生成的那个文件)
+        # 3. 加载 ROI 配置文件
         vision_config_path = os.path.join(self.config_dir, "vision_config.json")
         self.roi = None
         if os.path.exists(vision_config_path):
@@ -42,29 +42,31 @@ class VisionSystem:
         else:
             print("⚠️ [Vision] 未找到 vision_config.json，请先运行 calibrate_vision.py")
 
-        # 4. 🔥 定义颜色阈值 (在这里定义黄色)
-        # 格式: [Lower HSV, Upper HSV]
+        # 4. 🔥 核心修改：重新定义颜色阈值 (红、黄、银)
+        # 格式: 'color_name': [ (Lower_HSV, Upper_HSV), ... ]
+        # HSV范围: H(0-180), S(0-255), V(0-255)
         self.colors = {
+            # 🔴 红色 (跨越 0 和 180，需要两个区间)
             'red': [
-                (np.array([0, 120, 70]), np.array([10, 255, 255])),
-                (np.array([170, 120, 70]), np.array([180, 255, 255]))
+                (np.array([0, 43, 46]), np.array([10, 255, 255])),
+                (np.array([156, 43, 46]), np.array([180, 255, 255]))
             ],
-            'blue': [
-                (np.array([100, 150, 0]), np.array([140, 255, 255]))
-            ],
-            # 黄色通常在 20-35 之间
+            
+            # 🟡 金黄色 (Hue: 11-34, 涵盖橙黄到正黄)
             'yellow': [
-                (np.array([20, 100, 100]), np.array([35, 255, 255]))
+                (np.array([11, 43, 46]), np.array([34, 255, 255]))
+            ],
+
+            # ⚪ 银色 (特殊：低饱和度 + 中高亮度)
+            # 逻辑：只要饱和度(S)很低(<30)，且亮度(V)足够(>46)，就是银色/灰色
+            'silver': [
+                (np.array([0, 0, 46]), np.array([180, 40, 255]))
             ]
         }
 
     def process_frame(self, frame):
         """
-        新版处理流程：
-        1. 去畸变
-        2. 画出 ROI 框 (给人类看)
-        3. 裁切 ROI 区域
-        4. 分析颜色
+        处理流程：去畸变 -> 绘制ROI -> 裁切 -> 颜色分析
         """
         # 1. 去畸变
         if self.mtx is not None:
@@ -73,51 +75,60 @@ class VisionSystem:
             dst = cv2.undistort(frame, self.mtx, self.dist, None, newcameramtx)
             frame = dst
 
-        # 结果容器
+        # 初始化结果容器
         result = {
             "detected": False,
             "color": "unknown",
-            "offset": (0, 0) # 兼容旧接口，虽然现在不需要了
+            "offset": (0, 0)
         }
 
         # 2. 如果没有 ROI，直接返回
         if not self.roi:
             cv2.putText(frame, "NO CONFIG", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            return frame, None
+            return frame, result
 
-        # 3. 绘制 ROI 框 (绿色矩形)，方便调试
+        # 3. 绘制 ROI 框 (绿色矩形)
         x, y, w, h = self.roi
         cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
         cv2.putText(frame, "Detection Zone", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
         # 4. 🔥 核心逻辑：裁切 + 颜色分析
         roi_img = frame[y:y+h, x:x+w]
+        
+        # 转换到 HSV 空间
         hsv_roi = cv2.cvtColor(roi_img, cv2.COLOR_BGR2HSV)
         
+        # 为了防止画面噪点（比如反光）造成的误判，进行简单的模糊处理
+        hsv_roi = cv2.GaussianBlur(hsv_roi, (5, 5), 0)
+
         detected_color = None
         max_pixels = 0
         total_pixels = w * h
-        threshold = total_pixels * 0.05 # 必须占满 ROI 的 5% 才算有效
+        
+        # 阈值：颜色像素必须占 ROI 面积的 5% 以上才算识别成功
+        # 银色可能需要更严格的阈值，防止背景误判
+        pixel_threshold = total_pixels * 0.05 
 
-        # 遍历所有定义的颜色 (红、蓝、黄)
+        # 遍历颜色库
         for color_name, ranges in self.colors.items():
             mask = np.zeros(hsv_roi.shape[:2], dtype="uint8")
             
-            # 处理颜色范围 (有的颜色像红色有两个区间，需要合并)
-            if isinstance(ranges[0], tuple): 
-                # 只有单个区间的 (如蓝、黄) - 这里的结构适配稍微调整一下以防万一
-                # 上面的定义里 blue 和 yellow 我用的是 list 包裹 tuple，逻辑统一如下：
-                 for (lower, upper) in ranges:
-                    mask += cv2.inRange(hsv_roi, lower, upper)
-            else:
-                # 兼容旧写法
-                 mask = cv2.inRange(hsv_roi, ranges[0], ranges[1])
+            # 合并该颜色的所有 HSV 区间
+            for (lower, upper) in ranges:
+                mask += cv2.inRange(hsv_roi, lower, upper)
 
-            # 统计像素
+            # 腐蚀与膨胀 (去除噪点)
+            mask = cv2.erode(mask, None, iterations=2)
+            mask = cv2.dilate(mask, None, iterations=2)
+
+            # 统计符合颜色的像素点数量
             count = cv2.countNonZero(mask)
             
-            # 找出像素最多的那个颜色
-            if count > threshold and count > max_pixels:
+            # 调试用的：打印每个颜色看到的像素数 (可选)
+            # print(f"Color: {color_name}, Pixels: {count}")
+
+            # 找出像素最多且超过阈值的颜色
+            if count > pixel_threshold and count > max_pixels:
                 max_pixels = count
                 detected_color = color_name
 
@@ -128,12 +139,12 @@ class VisionSystem:
             
             # 在画面上显示结果
             text = f"Color: {detected_color.upper()}"
+            # 显示文字背景，让字更清晰
+            (text_w, text_h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+            cv2.rectangle(frame, (x, y + h + 5), (x + text_w, y + h + 30), (0, 0, 0), -1)
             cv2.putText(frame, text, (x, y + h + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
             
-            # 画一个实心圆点表示识别到了
-            cv2.circle(frame, (x + w//2, y + h//2), 10, (0, 255, 255), -1)
+            # 画一个实心圆点表示识别中心
+            cv2.circle(frame, (x + w//2, y + h//2), 8, (0, 255, 0), -1)
 
-        # process_frame 约定返回 (处理后的图片, 结果数据)
-        # 注意：这里第二个返回值改成了字典 result，而不是以前的 offset
-        # 我们需要在 main.py 里适配这个变化
         return frame, result

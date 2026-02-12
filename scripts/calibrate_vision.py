@@ -1,159 +1,201 @@
+# -*- coding: utf-8 -*-
+# scripts/calibrate_vision.py
+
 import cv2
 import numpy as np
 import json
 import os
 
-# --- 全局变量 ---
+# --- 全局状态 ---
 drawing = False
 roi_start = (0, 0)
 roi_end = (0, 0)
-current_roi = None # 格式: (x, y, w, h)
+current_roi = None  # [x, y, w, h]
 
-# 颜色阈值字典 (开发阶段先用大概范围，后续可以通过右键点击精确调整)
-# 格式: 'color_name': [lower_hsv, upper_hsv]
-color_ranges = {
-    'red':   [np.array([0, 120, 70]), np.array([10, 255, 255])],     # 红色通常在 0-10 和 170-180
-    'red2':  [np.array([170, 120, 70]), np.array([180, 255, 255])],  # 红色的另一端
-    'blue':  [np.array([100, 150, 0]), np.array([140, 255, 255])],   # 蓝色范围
-    'green': [np.array([40, 70, 70]), np.array([80, 255, 255])],      # 绿色范围
-    'yellow': [np.array([20, 100, 100]), np.array([35, 255, 255])]
+# 颜色配置缓存
+# 默认值：[H_min, S_min, V_min, H_max, S_max, V_max]
+color_configs = {
+    'red':    [0, 100, 80, 10, 255, 255],    # 红色初始值
+    'yellow': [20, 80, 80, 35, 255, 255],    # 黄色初始值
+    'silver': [0, 0, 100, 180, 30, 255]      # 银色初始值 (低饱和度, 高亮度)
 }
 
-def mouse_callback(event, x, y, flags, param):
-    global drawing, roi_start, roi_end, current_roi, frame_hsv
+# 当前正在调试的颜色模式
+current_mode = 'red' # red, yellow, silver
 
-    # --- 左键拖动：画 ROI 框 ---
+# 窗口名称
+WIN_MAIN = "Vision Calibration (Main)"
+WIN_MASK = "Mask Preview"
+WIN_CTRL = "Color Controls"
+
+def nothing(x):
+    pass
+
+def mouse_callback(event, x, y, flags, param):
+    global drawing, roi_start, roi_end, current_roi, frame_hsv, color_configs, current_mode
+
+    # --- 左键：画 ROI 框 ---
     if event == cv2.EVENT_LBUTTONDOWN:
         drawing = True
         roi_start = (x, y)
         roi_end = (x, y)
-    
     elif event == cv2.EVENT_MOUSEMOVE:
         if drawing:
             roi_end = (x, y)
-    
     elif event == cv2.EVENT_LBUTTONUP:
         drawing = False
         roi_end = (x, y)
-        # 计算 ROI (x, y, w, h)
-        x_min = min(roi_start[0], roi_end[0])
-        y_min = min(roi_start[1], roi_end[1])
         w = abs(roi_start[0] - roi_end[0])
         h = abs(roi_start[1] - roi_end[1])
         if w > 10 and h > 10:
-            current_roi = (x_min, y_min, w, h)
-            print(f"✅ ROI 已设定: {current_roi}")
-        else:
-            print("⚠️ 区域太小，已忽略")
+            current_roi = [min(roi_start[0], roi_end[0]), min(roi_start[1], roi_end[1]), w, h]
+            print(f"✅ ROI 更新: {current_roi}")
 
-    # --- 右键点击：取色 (帮你分析贴纸颜色) ---
+    # --- 右键：点击取色 (自动调整滑动条) ---
     elif event == cv2.EVENT_RBUTTONDOWN:
         if frame_hsv is not None:
             pixel = frame_hsv[y, x]
-            print(f"🔍 坐标({x},{y}) 的 HSV 值: {pixel}")
-            print(f"   提示: Hue(色相)={pixel[0]}, Sat(饱和度)={pixel[1]}, Val(亮度)={pixel[2]}")
+            h, s, v = pixel
+            print(f"🔍 点击点 HSV: {pixel} -> 自动调整 '{current_mode}' 阈值")
+            
+            # 自动设置一个宽容度 (H±10, S±40, V±40)
+            h_min = max(0, h - 10)
+            h_max = min(180, h + 10)
+            s_min = max(0, s - 40)
+            s_max = min(255, s + 40)
+            v_min = max(0, v - 40)
+            v_max = min(255, v + 40)
+
+            # 更新滑动条位置
+            update_trackbars([h_min, s_min, v_min, h_max, s_max, v_max])
+
+def update_trackbars(values):
+    """更新滑动条位置"""
+    cv2.setTrackbarPos('H Min', WIN_CTRL, int(values[0]))
+    cv2.setTrackbarPos('S Min', WIN_CTRL, int(values[1]))
+    cv2.setTrackbarPos('V Min', WIN_CTRL, int(values[2]))
+    cv2.setTrackbarPos('H Max', WIN_CTRL, int(values[3]))
+    cv2.setTrackbarPos('S Max', WIN_CTRL, int(values[4]))
+    cv2.setTrackbarPos('V Max', WIN_CTRL, int(values[5]))
 
 def save_config():
     if current_roi is None:
         print("❌ 无法保存: 请先画一个 ROI 框")
         return
 
-    # 路径回退一级到根目录，再进 config
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     config_path = os.path.join(base_dir, 'config', 'vision_config.json')
 
+    # 构造保存数据
+    # 注意：为了让 vision.py 方便读取，我们需要把红色拆分成两个区间（如果它跨越了 0/180）
+    # 但为了简化工具，这里我们保存原始的 min/max，由 vision.py 去处理逻辑
     data = {
-        "roi": current_roi, # [x, y, w, h]
-        # 这里仅保存 ROI，颜色阈值通常写在代码里或者高级配置里，
-        # 但为了演示，我们也可以把颜色配置留个接口
-        "color_mode": "hsv" 
+        "roi": current_roi,
+        "colors": {}
     }
-    
+
+    for color, vals in color_configs.items():
+        # vals: [h_min, s_min, v_min, h_max, s_max, v_max]
+        lower = [int(vals[0]), int(vals[1]), int(vals[2])]
+        upper = [int(vals[3]), int(vals[4]), int(vals[5])]
+        
+        # 特殊处理红色：如果用户设置的 H_min 很小 (e.g. 0) 且 H_max 很大 (e.g. 180)，不做特殊处理
+        # 但通常红色标定在 0-10 或 170-180。我们直接保存这个范围。
+        # vision.py 会读取这个列表
+        data["colors"][color] = [lower, upper]
+
     with open(config_path, 'w') as f:
         json.dump(data, f, indent=4)
     print(f"💾 配置已保存至: {config_path}")
+    print(f"   包含 ROI 和 颜色阈值: {list(data['colors'].keys())}")
 
 def main():
-    global frame_hsv
-    
-    # 尝试打开摄像头
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-    if not cap.isOpened():
-        print("❌ 无法打开摄像头")
-        return
+    global frame_hsv, current_mode, color_configs
 
-    cv2.namedWindow("Calibration")
-    cv2.setMouseCallback("Calibration", mouse_callback)
+    # 初始化窗口
+    cv2.namedWindow(WIN_MAIN)
+    cv2.setMouseCallback(WIN_MAIN, mouse_callback)
+    
+    cv2.namedWindow(WIN_MASK)
+    cv2.namedWindow(WIN_CTRL)
+    cv2.resizeWindow(WIN_CTRL, 400, 300)
+
+    # 创建滑动条
+    def on_trackbar(val): pass
+    cv2.createTrackbar('H Min', WIN_CTRL, 0, 180, on_trackbar)
+    cv2.createTrackbar('S Min', WIN_CTRL, 0, 255, on_trackbar)
+    cv2.createTrackbar('V Min', WIN_CTRL, 0, 255, on_trackbar)
+    cv2.createTrackbar('H Max', WIN_CTRL, 0, 180, on_trackbar)
+    cv2.createTrackbar('S Max', WIN_CTRL, 0, 255, on_trackbar)
+    cv2.createTrackbar('V Max', WIN_CTRL, 0, 255, on_trackbar)
+
+    # 初始化当前模式的滑动条
+    update_trackbars(color_configs[current_mode])
+
+    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
     print("="*50)
-    print("🎥 视觉标定工具 v1.0")
-    print("🖱️  左键拖动: 框选盒子出现的固定区域 (ROI)")
-    print("🖱️  右键点击: 查看像素点的 HSV 颜色值 (用于调试阈值)")
-    print("⌨️  S 键: 保存配置并退出")
-    print("⌨️  Q 键: 不保存退出")
+    print("🎨 高级颜色标定工具")
+    print("1. 🖱️ 左键拖动: 画 ROI 框 (只在这个区域内识别)")
+    print("2. ⌨️ 按键切换颜色模式:")
+    print("   [1] 红色 (Red)")
+    print("   [2] 黄色 (Yellow)")
+    print("   [3] 银色 (Silver)")
+    print("3. 🖱️ 右键点击: 点击画面中的物体，自动吸取颜色")
+    print("4. 🎚️ 调整滑动条: 观察 Mask 窗口，直到只有目标物体变白")
+    print("5. ⌨️ S 键: 保存并退出")
     print("="*50)
 
     while True:
         ret, frame = cap.read()
         if not ret: break
 
-        # 转换 HSV 用于取色分析
         frame_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        
         display = frame.copy()
 
-        # 1. 绘制正在画的框
-        if drawing:
-            cv2.rectangle(display, roi_start, roi_end, (0, 255, 255), 2)
+        # 读取滑动条当前值
+        h_min = cv2.getTrackbarPos('H Min', WIN_CTRL)
+        s_min = cv2.getTrackbarPos('S Min', WIN_CTRL)
+        v_min = cv2.getTrackbarPos('V Min', WIN_CTRL)
+        h_max = cv2.getTrackbarPos('H Max', WIN_CTRL)
+        s_max = cv2.getTrackbarPos('S Max', WIN_CTRL)
+        v_max = cv2.getTrackbarPos('V Max', WIN_CTRL)
+
+        # 更新内存中的配置
+        color_configs[current_mode] = [h_min, s_min, v_min, h_max, s_max, v_max]
+
+        # 生成掩膜 (Mask)
+        lower = np.array([h_min, s_min, v_min])
+        upper = np.array([h_max, s_max, v_max])
         
-        # 2. 绘制已确定的 ROI
+        # 针对 ROI 区域做 Mask 预览
+        mask_display = np.zeros(frame.shape[:2], dtype="uint8")
+        
         if current_roi:
             x, y, w, h = current_roi
-            cv2.rectangle(display, (x, y), (x+w, y+h), (0, 255, 0), 2)
-            cv2.putText(display, "ROI Area", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
-            # --- 实时预览：在这个 ROI 里找颜色 ---
-            # 这是一个简单的预览，看看能不能识别出红色
             roi_img = frame_hsv[y:y+h, x:x+w]
             
-            # 检测红色 (合并两个红色区间)
-            mask1 = cv2.inRange(roi_img, color_ranges['red'][0], color_ranges['red'][1])
-            mask2 = cv2.inRange(roi_img, color_ranges['red2'][0], color_ranges['red2'][1])
-            mask_red = mask1 + mask2
+            # 计算 mask
+            mask_roi = cv2.inRange(roi_img, lower, upper)
             
-            # 检测蓝色
-            mask_blue = cv2.inRange(roi_img, color_ranges['blue'][0], color_ranges['blue'][1])
-
-            # 检测黄色
-            mask_yellow = cv2.inRange(roi_img, color_ranges['yellow'][0], color_ranges['yellow'][1])
-
-            # 统计像素点
-            red_pixels = cv2.countNonZero(mask_red)
-            blue_pixels = cv2.countNonZero(mask_blue)
-            yellow_pixels = cv2.countNonZero(mask_yellow) # 🔥 统计黄色像素
-
-            total_pixels = w * h
-
-            # 简单的判断逻辑 (如果红色像素超过 5% 就认为是红色)
-            detected_color = "None"
-            color_bgr = (200, 200, 200)
-
-            threshold = total_pixels * 0.05
-
-            if red_pixels > threshold:
-                detected_color = "RED"
-                color_bgr = (0, 0, 255)
-            elif blue_pixels > threshold:
-                detected_color = "BLUE"
-                color_bgr = (255, 0, 0)
-            elif yellow_pixels > threshold: # 🔥 新增判断
-                detected_color = "YELLOW"
-                color_bgr = (0, 255, 255) # 黄色的 BGR 显示颜色 (Cyan)
+            # 将 mask 放回全图位置方便观察
+            mask_display[y:y+h, x:x+w] = mask_roi
             
-            # 在 ROI 中心显示识别结果
-            cv2.putText(display, detected_color, (x+10, y+h//2), cv2.FONT_HERSHEY_SIMPLEX, 1, color_bgr, 3)
+            # 画框
+            cv2.rectangle(display, (x, y), (x+w, y+h), (0, 255, 0), 2)
+            cv2.putText(display, f"ROI: {current_mode.upper()}", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        else:
+            # 如果没画 ROI，全屏处理方便调试颜色
+            mask_display = cv2.inRange(frame_hsv, lower, upper)
+            if drawing:
+                cv2.rectangle(display, roi_start, roi_end, (0, 255, 255), 2)
 
-        cv2.imshow("Calibration", display)
+        # 显示
+        cv2.putText(display, f"MODE: {current_mode.upper()}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+        cv2.imshow(WIN_MAIN, display)
+        cv2.imshow(WIN_MASK, mask_display)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord('s'):
@@ -161,6 +203,19 @@ def main():
             break
         elif key == ord('q'):
             break
+        # 模式切换
+        elif key == ord('1'):
+            current_mode = 'red'
+            update_trackbars(color_configs['red'])
+            print(f"👉 切换到: 红色调试")
+        elif key == ord('2'):
+            current_mode = 'yellow'
+            update_trackbars(color_configs['yellow'])
+            print(f"👉 切换到: 黄色调试")
+        elif key == ord('3'):
+            current_mode = 'silver'
+            update_trackbars(color_configs['silver'])
+            print(f"👉 切换到: 银色调试")
 
     cap.release()
     cv2.destroyAllWindows()
