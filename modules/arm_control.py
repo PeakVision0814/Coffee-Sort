@@ -30,20 +30,28 @@ class ArmController:
             # 2. 上电
             if not self.mc.is_power_on():
                 self.mc.power_on()
-                time.sleep(0.5)
+                time.sleep(0.2)
             
-            # 3. 🔥 初始状态：松开气爪 (G2=1 为松开/停止)
+            # 3. 初始状态
             self.gripper_open()
-            # 🔥 初始状态：PLC 信号置低 (G5=0)
             self.set_plc_signal(False)
             
-            # 速度设置
-            self.speed = 80
+            # --- 速度策略 ---
+            # 精准速度：用于最后接近目标，稍微慢一点点保证准度
+            self.speed = 60 
+            # 飞越速度：用于中间过渡，全速运行
+            self.fly_speed = 100
+            
+            # --- 延时策略 (关键修改) ---
+            # 飞越时间：中间点只停顿一瞬间
+            self.fly_time = 0.3
+            # 到位时间：目标点必须给足时间让机械臂飞过去 (如果抓不准，调大这个值)
+            self.arrival_time = 1.8 
             
             # 4. 测试通讯
             angles = self.mc.get_angles()
             if angles:
-                print(f"[INFO] [Arm] Connected successfully. Angles: {angles}")
+                print(f"[INFO] [Arm] Connected. Angles: {angles}")
                 self.is_connected = True
                 self.mc.set_color(0, 255, 0)
             else:
@@ -52,106 +60,118 @@ class ArmController:
         except Exception as e:
             print(f"[ERROR] [Arm] Connection failed: {e}")
 
-    # --- 🔥 新增：气爪与 PLC 控制 ---
+    # --- 气爪与 PLC ---
     def gripper_open(self):
-        """松开气爪 (G2 高电平)"""
         if self.is_connected:
-            # 假设 0 是闭合 (断开继电器)
             self.mc.set_basic_output(settings.GPIO_GRIPPER, 0)
-            time.sleep(0.3)
+            time.sleep(0.1)
 
     def gripper_close(self):
-        """闭合气爪 (G2 低电平)"""
         if self.is_connected:
-            # 假设 0 是张开 (吸合继电器)
             self.mc.set_basic_output(settings.GPIO_GRIPPER, 1)
-            time.sleep(0.3)
+            time.sleep(0.1)
 
     def set_plc_signal(self, active: bool):
-        """给 PLC 发送完成信号 (G5)"""
         if self.is_connected:
-            # active=True 发送高电平(1)，False 发送低电平(0)
-            # 具体电平逻辑取决于 PLC 是 PNP 还是 NPN，这里假设高电平有效
             val = 1 if active else 0
             self.mc.set_basic_output(settings.GPIO_PLC_SIGNAL, val)
 
     # --- 核心工具 ---
     def move_to_angles(self, angles, speed, delay_time):
+        """发送指令并等待"""
         if not self.is_connected: return
         try:
             self.mc.send_angles(angles, speed)
-            time.sleep(delay_time)
+            if delay_time > 0:
+                time.sleep(delay_time)
         except Exception as e:
             print(f"[ERROR] [Arm] Move command failed: {e}")
 
-    # --- 业务动作 ---
+    # --- 业务动作 (修复版) ---
 
     def go_observe(self):
         if not self.is_connected: return
-        print("[INFO] [Arm] Executing safe reset (observe pose)...")
         try:
-            self.mc.power_on()
-            time.sleep(0.5)
             target = settings.PICK_POSES["observe"]
-            self.move_to_angles(target, self.speed, 2.0) 
-            print("[INFO] [Arm] Reset complete.")
+            # 归位可以快一点
+            self.move_to_angles(target, self.fly_speed, 1.5) 
         except Exception as e:
-            print(f"[ERROR] [Arm] Reset failed: {e}")
+            print(f"[ERROR] Reset failed: {e}")
 
     def pick(self):
-        """执行抓取流程 (已适配气爪)"""
+        """执行抓取"""
         if not self.is_connected: return
-        print(f"[INFO] [Arm] Sequence START: Pick Operation")
+        print(f"[INFO] [Arm] Action: Pick")
 
-        pose_high = settings.PICK_POSES["observe"] 
+        pose_high = settings.PICK_POSES["observe"]
+        pose_mid  = settings.PICK_POSES.get("mid")
         pose_low  = settings.PICK_POSES["grab"]    
         
-        # 1. 确保气爪松开
         self.gripper_open()
         
-        # 2. 下抓
-        self.move_to_angles(pose_low, self.speed, 1.2)
+        # --- 下行阶段 ---
+        if pose_mid:
+            # High -> Mid: 快速逼近，不停留 (delay=0.3)
+            self.move_to_angles(pose_mid, self.fly_speed, self.fly_time)
         
-        # 3. 闭合气爪 (抓取)
+        # Mid -> Low: 🔥 关键修改！必须给足时间 (delay=1.8)
+        # 只有机械臂完全到位了，才能执行下一句 gripper_close
+        self.move_to_angles(pose_low, self.speed, self.arrival_time)
+        
+        # --- 抓取 ---
+        # 此时机械臂应该已经静止在 Low 点了
         self.gripper_close()
-        time.sleep(0.5) # 等待气压稳定
+        time.sleep(0.5) # 抓紧等待
 
-        # 4. 抬起
-        self.move_to_angles(pose_high, self.speed, 1.0)
+        # --- 上行阶段 ---
+        if pose_mid:
+            # Low -> Mid: 快速离开
+            self.move_to_angles(pose_mid, self.fly_speed, self.fly_time)
+            
+        # Mid -> High: 快速回正
+        self.move_to_angles(pose_high, self.fly_speed, self.fly_time)
 
     def place(self, slot_id):
-        """放置到槽位 (已适配气爪 + PLC信号)"""
+        """放置"""
         if not self.is_connected: return
         
         rack_data = settings.STORAGE_RACKS.get(slot_id)
-        if not rack_data:
-            print(f"[ERROR] [Arm] Invalid slot ID: {slot_id}")
-            return
+        if not rack_data: return
 
-        print(f"[INFO] [Arm] Sequence START: Place -> Slot {slot_id}")
+        print(f"[INFO] [Arm] Action: Place -> {slot_id}")
         
         pose_high = rack_data["high"]
+        pose_mid  = rack_data.get("mid")
         pose_low  = rack_data["low"]
 
-        # 1. 移动到槽位上方 (High)
-        self.move_to_angles(pose_high, self.speed, 2.0) 
+        # 1. 飞向槽位上方
+        self.move_to_angles(pose_high, self.fly_speed, 1.5) 
 
-        # 2. 下放 (Low)
-        self.move_to_angles(pose_low, self.speed, 1.2)
+        # 2. --- 下放阶段 ---
+        if pose_mid:
+            # High -> Mid: 快速逼近
+            self.move_to_angles(pose_mid, self.fly_speed, self.fly_time)
+            
+        # Mid -> Low: 🔥 关键修改！必须到位 (delay=1.8)
+        self.move_to_angles(pose_low, self.speed, self.arrival_time)
 
-        # 3. 松开气爪 (放置)
+        # 3. --- 放下 ---
+        # 此时机械臂已经静止在 Low 点
         self.gripper_open()
-        time.sleep(0.5) 
+        time.sleep(0.3) 
 
-        # 4. 抬起 (High)
-        self.move_to_angles(pose_high, self.speed, 1.0)
+        # 4. --- 撤离阶段 ---
+        if pose_mid:
+            # Low -> Mid: 快速撤离
+            self.move_to_angles(pose_mid, self.fly_speed, self.fly_time)
+            
+        # Mid -> High
+        self.move_to_angles(pose_high, self.fly_speed, self.fly_time)
 
-        # 5. 🔥 给 PLC 发送完成信号 (脉冲)
-        print("[INFO] [Arm] Sending PLC Finish Signal...")
-        self.set_plc_signal(True)  # ON
-        time.sleep(0.5)            # 保持 0.5 秒
-        self.set_plc_signal(False) # OFF
+        # 5. PLC 信号
+        self.set_plc_signal(True)
+        time.sleep(0.2)
+        self.set_plc_signal(False)
 
         # 6. 归位
         self.go_observe()
-        print(f"[INFO] [Arm] Sequence COMPLETE.")
