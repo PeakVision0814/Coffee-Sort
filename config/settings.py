@@ -10,9 +10,9 @@ BAUD = 115200
 GPIO_GRIPPER = 2 
 # PLC 完成信号 (输出): 接 G5
 GPIO_PLC_SIGNAL = 5
-# PLC 启动信号 (输入): 接 G36 (暂未启用)
+# PLC 启动信号 (输入): 接 G36
 GPIO_START_BTN = 36
-# PLC 复位信号 (输入): 接 G35 (暂未启用)
+# PLC 复位信号 (输入): 接 G35
 GPIO_RESET_BTN = 35
 
 # --- 🎯 核心策略：全角度控制 (Angle Control) ---

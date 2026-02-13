@@ -49,6 +49,29 @@ class ArmController:
         """回到抓取最高观测点"""
         self.move_to_angles(settings.PICK_POSES["observe"], self.fly_speed, 1.5)
 
+    def get_input(self, pin):
+        """读取底座 GPIO 输入 (返回 0 或 1)"""
+        if self.is_connected:
+            return self.mc.get_basic_input(pin)
+        return 0
+
+    def is_start_signal_active(self):
+        """
+        检查启动信号 (G36)
+        假设逻辑：1 (高电平) = 有信号/正常运行, 0 = 信号消失/急停
+        """
+        return self.get_input(settings.GPIO_START_BTN) == 1
+
+    def is_reset_signal_active(self):
+        """检查复位信号 (G35)"""
+        return self.get_input(settings.GPIO_RESET_BTN) == 1
+
+    def emergency_stop(self):
+        """🛑 硬件级急停"""
+        if self.is_connected:
+            print("[ARM] 🛑 EMERGENCY STOP COMMAND SENT!")
+            self.mc.stop() # 发送停止指令给底层 MCU
+
     def pick(self):
         """抓取逻辑: High -> Mid -> Low -> Grab -> Mid -> High"""
         print("[Arm] Sequence: Picking...")
