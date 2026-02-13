@@ -22,6 +22,8 @@ from modules.vision import VisionSystem
 from modules.arm_control import ArmController
 from modules.ai_decision import AIDecisionMaker
 from modules import web_server
+# 🔥 修改点 1: 导入 PLC 客户端模块
+from modules.plc_comm import PLCClient
 from config import settings
 
 if settings.SIMULATION_MODE:
@@ -55,7 +57,7 @@ file_handler = RotatingFileHandler(
     LOG_FILE_PATH, maxBytes=2*1024*1024, backupCount=5, encoding='utf-8'
 )
 
-# 🔥 修改点 1：格式化字符串增加 %Y-%m-%d
+# 格式化字符串增加 %Y-%m-%d
 file_formatter = logging.Formatter('[%(asctime)s] %(levelname)s [%(name)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 file_handler.setFormatter(file_formatter)
 
@@ -68,7 +70,6 @@ def log_msg(level, module, message):
     1. 生成带颜色的字符串供控制台打印 (保持原有逻辑)
     2. 将纯净日志写入文件 (新增逻辑)
     """
-    # 🔥 修改点 2：手动时间戳增加 %Y-%m-%d
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     
     # --- 写入文件 (使用 logging 模块) ---
@@ -102,6 +103,8 @@ def perform_pick_and_place(arm, target_slot, active_mode="SINGLE_TASK", restore_
             restore_mode = "IDLE"
 
         arm.place(target_slot)
+        # 注意：这里虽然我们手动置1，但在下一次循环中，PLC的真实状态会覆盖它
+        # 这正是我们想要的：以PLC传感器为准
         state.inventory[target_slot] = 1
         
         # 任务完成后，设置系统消息
@@ -135,6 +138,11 @@ def main():
     vision = VisionSystem()
     ai = AIDecisionMaker()
     
+    # 🔥 修改点 2: 初始化 PLC 连接
+    print(log_msg("INFO", "System", "Connecting to PLC (192.168.0.10)..."))
+    # 根据你的网络情况，这里可能需要一点超时处理，PLCClient类里已经处理了
+    plc = PLCClient(ip='192.168.0.10')
+    
     if settings.SIMULATION_MODE:
         cap = MockCamera()
     else:
@@ -160,6 +168,14 @@ def main():
                 state.current_task = None
                 state.system_msg = "⚠️ Connection lost. System paused."
 
+            # 🔥 修改点 3: 实时同步 PLC 状态
+            # 这里的逻辑是：PLC 是物理世界的“真理”。
+            # 无论之前软件状态如何，每一帧都以 PLC 传感器的读数为准。
+            real_inventory = plc.get_slots_status()
+            if real_inventory:
+                state.inventory = real_inventory
+            # 如果 plc 返回 None (断连)，保持上一帧的 state.inventory 不变，避免系统崩溃
+
             ret, frame = cap.read()
             if not ret: 
                 time.sleep(0.1)
@@ -173,7 +189,7 @@ def main():
                 
                 print(log_msg("INFO", "Main", f"Received Batch CMDs: {len(cmd_list)}"))
 
-                # 🔥 核心修改：遍历执行每一条指令
+                # 遍历执行每一条指令
                 for cmd in cmd_list:
                     cmd_action = cmd.get('action')
                     cmd_type = cmd.get('type')
@@ -183,6 +199,8 @@ def main():
                         sid = cmd.get('slot_id')
                         sts = cmd.get('status')
                         
+                        # 注意：虽然这里可以手动修改，但下一帧循环会被 PLC 的真实状态覆盖
+                        # 除非 PLC 传感器坏了或者这是模拟模式
                         if sid == 0: # 批量
                             for i in range(1, 7): state.inventory[i] = sts
                             status_str = "FULL" if sts == 1 else "EMPTY"
@@ -281,6 +299,8 @@ def main():
 
     except KeyboardInterrupt: pass
     finally:
+        # 🔥 修改点 4: 退出时关闭 PLC 连接
+        plc.close()
         cap.release()
         cv2.destroyAllWindows()
         sys.exit(0)

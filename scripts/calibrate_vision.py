@@ -13,15 +13,18 @@ roi_end = (0, 0)
 current_roi = None  # [x, y, w, h]
 
 # 颜色配置缓存
-# 默认值：[H_min, S_min, V_min, H_max, S_max, V_max]
+# 格式：[H_min, S_min, V_min, H_max, S_max, V_max]
 color_configs = {
-    'red':    [0, 100, 80, 10, 255, 255],    # 红色初始值
-    'yellow': [20, 80, 80, 35, 255, 255],    # 黄色初始值
-    'silver': [0, 0, 100, 180, 30, 255]      # 银色初始值 (低饱和度, 高亮度)
+    'red':    [0, 100, 80, 10, 255, 255],    # 红色
+    'yellow': [20, 80, 80, 35, 255, 255],    # 黄色
+    # 🥈 银色修改建议：提高 V_min (比如到 120)，只保留亮的，排除暗的
+    'silver': [0, 0, 120, 180, 40, 255],     
+    # 🖤 新增黑色：任意 H/S，但 V_max 必须很低 (比如低于 60)
+    'black':  [0, 0, 0, 180, 255, 60]       
 }
 
 # 当前正在调试的颜色模式
-current_mode = 'red' # red, yellow, silver
+current_mode = 'silver' # 默认先进银色调试，方便你看效果
 
 # 窗口名称
 WIN_MAIN = "Vision Calibration (Main)"
@@ -30,6 +33,15 @@ WIN_CTRL = "Color Controls"
 
 def nothing(x):
     pass
+
+# 定义更新滑动条的辅助函数
+def set_trackbars(values):
+    cv2.setTrackbarPos('H Min', WIN_CTRL, int(values[0]))
+    cv2.setTrackbarPos('S Min', WIN_CTRL, int(values[1]))
+    cv2.setTrackbarPos('V Min', WIN_CTRL, int(values[2]))
+    cv2.setTrackbarPos('H Max', WIN_CTRL, int(values[3]))
+    cv2.setTrackbarPos('S Max', WIN_CTRL, int(values[4]))
+    cv2.setTrackbarPos('V Max', WIN_CTRL, int(values[5]))
 
 def mouse_callback(event, x, y, flags, param):
     global drawing, roi_start, roi_end, current_roi, frame_hsv, color_configs, current_mode
@@ -51,101 +63,83 @@ def mouse_callback(event, x, y, flags, param):
             current_roi = [min(roi_start[0], roi_end[0]), min(roi_start[1], roi_end[1]), w, h]
             print(f"✅ ROI 更新: {current_roi}")
 
-    # --- 右键：点击取色 (自动调整滑动条) ---
+    # --- 右键：点击取色 (自动调整) ---
     elif event == cv2.EVENT_RBUTTONDOWN:
         if frame_hsv is not None:
             pixel = frame_hsv[y, x]
             h, s, v = pixel
-            print(f"🔍 点击点 HSV: {pixel} -> 自动调整 '{current_mode}' 阈值")
+            print(f"🔍 点击点 HSV: {pixel} (模式: {current_mode})")
             
-            # 自动设置一个宽容度 (H±10, S±40, V±40)
-            h_min = max(0, h - 10)
-            h_max = min(180, h + 10)
-            s_min = max(0, s - 40)
-            s_max = min(255, s + 40)
-            v_min = max(0, v - 40)
-            v_max = min(255, v + 40)
-
-            # 更新滑动条位置
-            update_trackbars([h_min, s_min, v_min, h_max, s_max, v_max])
-
-def update_trackbars(values):
-    """更新滑动条位置"""
-    cv2.setTrackbarPos('H Min', WIN_CTRL, int(values[0]))
-    cv2.setTrackbarPos('S Min', WIN_CTRL, int(values[1]))
-    cv2.setTrackbarPos('V Min', WIN_CTRL, int(values[2]))
-    cv2.setTrackbarPos('H Max', WIN_CTRL, int(values[3]))
-    cv2.setTrackbarPos('S Max', WIN_CTRL, int(values[4]))
-    cv2.setTrackbarPos('V Max', WIN_CTRL, int(values[5]))
+            # 针对不同颜色的自动调整逻辑
+            if current_mode == 'black':
+                # 黑色策略：V_max 设为当前亮度 + 20，其他放宽
+                new_vals = [0, 0, 0, 180, 255, min(255, v + 30)]
+            elif current_mode == 'silver':
+                # 银色策略：S_max 要低，V_min 要高
+                new_vals = [0, 0, max(60, v - 40), 180, max(40, s + 20), 255]
+            else:
+                # 彩色策略
+                new_vals = [
+                    max(0, h - 10), max(0, s - 40), max(0, v - 40),
+                    min(180, h + 10), min(255, s + 40), min(255, v + 40)
+                ]
+            
+            set_trackbars(new_vals)
 
 def save_config():
-    if current_roi is None:
-        print("❌ 无法保存: 请先画一个 ROI 框")
-        return
-
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     config_path = os.path.join(base_dir, 'config', 'vision_config.json')
 
-    # 构造保存数据
-    # 注意：为了让 vision.py 方便读取，我们需要把红色拆分成两个区间（如果它跨越了 0/180）
-    # 但为了简化工具，这里我们保存原始的 min/max，由 vision.py 去处理逻辑
     data = {
-        "roi": current_roi,
+        "roi": current_roi if current_roi else [0, 0, 640, 480],
         "colors": {}
     }
 
     for color, vals in color_configs.items():
-        # vals: [h_min, s_min, v_min, h_max, s_max, v_max]
+        # 兼容旧逻辑：把 min/max 拆开
         lower = [int(vals[0]), int(vals[1]), int(vals[2])]
         upper = [int(vals[3]), int(vals[4]), int(vals[5])]
-        
-        # 特殊处理红色：如果用户设置的 H_min 很小 (e.g. 0) 且 H_max 很大 (e.g. 180)，不做特殊处理
-        # 但通常红色标定在 0-10 或 170-180。我们直接保存这个范围。
-        # vision.py 会读取这个列表
         data["colors"][color] = [lower, upper]
 
     with open(config_path, 'w') as f:
         json.dump(data, f, indent=4)
     print(f"💾 配置已保存至: {config_path}")
-    print(f"   包含 ROI 和 颜色阈值: {list(data['colors'].keys())}")
+    print(f"   已保存颜色: {list(data['colors'].keys())}")
 
 def main():
     global frame_hsv, current_mode, color_configs
 
-    # 初始化窗口
     cv2.namedWindow(WIN_MAIN)
     cv2.setMouseCallback(WIN_MAIN, mouse_callback)
-    
     cv2.namedWindow(WIN_MASK)
     cv2.namedWindow(WIN_CTRL)
-    cv2.resizeWindow(WIN_CTRL, 400, 300)
+    cv2.resizeWindow(WIN_CTRL, 400, 350)
 
     # 创建滑动条
-    def on_trackbar(val): pass
-    cv2.createTrackbar('H Min', WIN_CTRL, 0, 180, on_trackbar)
-    cv2.createTrackbar('S Min', WIN_CTRL, 0, 255, on_trackbar)
-    cv2.createTrackbar('V Min', WIN_CTRL, 0, 255, on_trackbar)
-    cv2.createTrackbar('H Max', WIN_CTRL, 0, 180, on_trackbar)
-    cv2.createTrackbar('S Max', WIN_CTRL, 0, 255, on_trackbar)
-    cv2.createTrackbar('V Max', WIN_CTRL, 0, 255, on_trackbar)
+    cv2.createTrackbar('H Min', WIN_CTRL, 0, 180, nothing)
+    cv2.createTrackbar('S Min', WIN_CTRL, 0, 255, nothing)
+    cv2.createTrackbar('V Min', WIN_CTRL, 0, 255, nothing)
+    cv2.createTrackbar('H Max', WIN_CTRL, 0, 180, nothing)
+    cv2.createTrackbar('S Max', WIN_CTRL, 0, 255, nothing)
+    cv2.createTrackbar('V Max', WIN_CTRL, 0, 255, nothing)
 
-    # 初始化当前模式的滑动条
-    update_trackbars(color_configs[current_mode])
+    # 初始化滑动条
+    set_trackbars(color_configs[current_mode])
 
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
     print("="*50)
-    print("🎨 高级颜色标定工具")
-    print("1. 🖱️ 左键拖动: 画 ROI 框 (只在这个区域内识别)")
-    print("2. ⌨️ 按键切换颜色模式:")
-    print("   [1] 红色 (Red)")
-    print("   [2] 黄色 (Yellow)")
-    print("   [3] 银色 (Silver)")
-    print("3. 🖱️ 右键点击: 点击画面中的物体，自动吸取颜色")
-    print("4. 🎚️ 调整滑动条: 观察 Mask 窗口，直到只有目标物体变白")
-    print("5. ⌨️ S 键: 保存并退出")
+    print("🎨 视觉调试工具 (含黑色支持)")
+    print("="*50)
+    print("1. 🖱️ 左键: 画 ROI 区域")
+    print("2. 🖱️ 右键: 点击画面物体自动吸色")
+    print("3. ⌨️ 切换模式:")
+    print("   [1] 红色  [2] 黄色")
+    print("   [3] 银色 (调节 V Min 来排除黑色)")
+    print("   [4] 黑色 (调节 V Max 来排除银色)")
+    print("4. ⌨️ [S] 保存  [Q] 退出")
     print("="*50)
 
     while True:
@@ -155,7 +149,7 @@ def main():
         frame_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         display = frame.copy()
 
-        # 读取滑动条当前值
+        # 获取滑动条的值
         h_min = cv2.getTrackbarPos('H Min', WIN_CTRL)
         s_min = cv2.getTrackbarPos('S Min', WIN_CTRL)
         v_min = cv2.getTrackbarPos('V Min', WIN_CTRL)
@@ -163,59 +157,59 @@ def main():
         s_max = cv2.getTrackbarPos('S Max', WIN_CTRL)
         v_max = cv2.getTrackbarPos('V Max', WIN_CTRL)
 
-        # 更新内存中的配置
+        # 实时更新配置
         color_configs[current_mode] = [h_min, s_min, v_min, h_max, s_max, v_max]
 
-        # 生成掩膜 (Mask)
+        # 核心：计算 Mask
         lower = np.array([h_min, s_min, v_min])
         upper = np.array([h_max, s_max, v_max])
         
-        # 针对 ROI 区域做 Mask 预览
-        mask_display = np.zeros(frame.shape[:2], dtype="uint8")
+        # 只显示 ROI 区域的 Mask
+        mask_full = np.zeros(frame.shape[:2], dtype="uint8")
         
         if current_roi:
             x, y, w, h = current_roi
-            roi_img = frame_hsv[y:y+h, x:x+w]
-            
-            # 计算 mask
-            mask_roi = cv2.inRange(roi_img, lower, upper)
-            
-            # 将 mask 放回全图位置方便观察
-            mask_display[y:y+h, x:x+w] = mask_roi
-            
-            # 画框
+            roi_hsv = frame_hsv[y:y+h, x:x+w]
+            mask_roi = cv2.inRange(roi_hsv, lower, upper)
+            mask_full[y:y+h, x:x+w] = mask_roi # 填回全图
             cv2.rectangle(display, (x, y), (x+w, y+h), (0, 255, 0), 2)
-            cv2.putText(display, f"ROI: {current_mode.upper()}", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
         else:
-            # 如果没画 ROI，全屏处理方便调试颜色
-            mask_display = cv2.inRange(frame_hsv, lower, upper)
-            if drawing:
-                cv2.rectangle(display, roi_start, roi_end, (0, 255, 255), 2)
+            mask_full = cv2.inRange(frame_hsv, lower, upper)
 
-        # 显示
-        cv2.putText(display, f"MODE: {current_mode.upper()}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+        # UI 显示
+        info_text = f"MODE: {current_mode.upper()}"
+        # 提示用户怎么调
+        if current_mode == 'silver':
+            hint = "Hint: Increase V-Min to exclude Black"
+        elif current_mode == 'black':
+            hint = "Hint: Decrease V-Max to exclude Silver"
+        else:
+            hint = ""
+            
+        cv2.putText(display, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+        cv2.putText(display, hint, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+
         cv2.imshow(WIN_MAIN, display)
-        cv2.imshow(WIN_MASK, mask_display)
+        cv2.imshow(WIN_MASK, mask_full)
 
         key = cv2.waitKey(1) & 0xFF
-        if key == ord('s'):
+        if key == ord('q'):
+            break
+        elif key == ord('s'):
             save_config()
             break
-        elif key == ord('q'):
-            break
-        # 模式切换
         elif key == ord('1'):
             current_mode = 'red'
-            update_trackbars(color_configs['red'])
-            print(f"👉 切换到: 红色调试")
+            set_trackbars(color_configs['red'])
         elif key == ord('2'):
             current_mode = 'yellow'
-            update_trackbars(color_configs['yellow'])
-            print(f"👉 切换到: 黄色调试")
+            set_trackbars(color_configs['yellow'])
         elif key == ord('3'):
             current_mode = 'silver'
-            update_trackbars(color_configs['silver'])
-            print(f"👉 切换到: 银色调试")
+            set_trackbars(color_configs['silver'])
+        elif key == ord('4'):
+            current_mode = 'black'
+            set_trackbars(color_configs['black'])
 
     cap.release()
     cv2.destroyAllWindows()
