@@ -27,11 +27,6 @@ from modules import web_server
 from modules.plc_comm import PLCClient
 from config import settings
 
-if settings.SIMULATION_MODE:
-    from modules.mock_hardware import MockCamera
-else:
-    MockCamera = None
-
 # ================= 配置日志系统 =================
 LOG_FILE_PATH = os.path.join("logs", "system.log")
 if not os.path.exists("logs"):
@@ -61,7 +56,7 @@ def log_msg(level, module, message):
 class SystemState:
     def __init__(self):
         self.inventory = {i: 0 for i in range(1, 7)}
-        # 模式包括: IDLE, AUTO, SORTING_TASK, EXECUTING, SINGLE_TASK, EMERGENCY_STOP
+        # 模式包括: IDLE, AUTO, SORTING_TASK, EXECUTING, SINGLE_TASK
         self.mode = "IDLE" 
         self.pending_ai_cmd = None 
         self.last_heartbeat = time.time() + 15.0
@@ -81,52 +76,47 @@ def get_standard_success_msg(slot_id):
 
 # ================= 核心工作线程 =================
 def perform_pick_and_place(arm, target_slot, active_mode="SINGLE_TASK", restore_mode="IDLE"):
-    """执行完整的搬运流程 (增加安全检查)"""
+    """纯净版搬运流程：加入 PLC 业务握手"""
     try:
-        # 🔥 安全检查 1: 动作开始前
-        if state.mode == "EMERGENCY_STOP": raise Exception("Emergency Stop Active")
-        
         state.is_at_observe = False
         state.mode = active_mode
         
-        # --- 抓取 ---
-        # 🔥 安全检查 2: 抓取前再次确认
-        if state.mode == "EMERGENCY_STOP": raise Exception("Emergency Stop Active")
+        # --- 1. 抓取 ---
         arm.pick()
         
         if state.mode == "IDLE" and restore_mode != "IDLE":
             print(log_msg("WARN", "System", "Interrupt detected."))
             restore_mode = "IDLE"
 
-        # --- 放置 ---
-        # 🔥 安全检查 3: 放置前再次确认
-        if state.mode == "EMERGENCY_STOP": raise Exception("Emergency Stop Active")
+        # --- 2. 放置 ---
         arm.place(target_slot)
         
+        # --- 3. 🔥 动作完美完成，向 PLC 发送 G5 完成信号 ---
+        print(log_msg("INFO", "System", "Sending Task Complete Signal (G5) to PLC..."))
+        arm.set_plc_signal(True)
+        time.sleep(0.5)  # 保持高电平 0.5 秒，确保 PLC 的扫描周期能稳定捕捉到这个脉冲
+        arm.set_plc_signal(False)
+        
+        # --- 4. 更新系统状态 ---
         state.inventory[target_slot] = 1
         state.system_msg = get_standard_success_msg(target_slot)
         print(log_msg("INFO", "System", f"Slot {target_slot} mission complete."))
 
     except Exception as e:
+        # 如果上方任何一步（视觉、控制、通信）报错，绝对不会走到发信号这一步
         state.system_msg = f"❌ Error: {e}"
         print(log_msg("ERROR", "System", f"Process Stopped: {e}"))
-        # 只有在非急停状态下才尝试归位
-        if state.mode != "EMERGENCY_STOP":
-            try: arm.go_observe()
-            except: pass
+        try: arm.go_observe()
+        except: pass
         restore_mode = "IDLE" 
     
     finally:
-        # 🔥 安全检查 4: 如果是急停，禁止归位，保持现场
-        if state.mode != "EMERGENCY_STOP":
-            print(log_msg("INFO", "System", "Returning to Observe Point..."))
-            arm.go_observe() 
-            state.is_at_observe = True
-            
-            if state.mode == active_mode:
-                state.mode = restore_mode
-        else:
-            print(log_msg("WARN", "System", "⚠️ Stopped in place due to Emergency."))
+        print(log_msg("INFO", "System", "Returning to Observe Point..."))
+        arm.go_observe() 
+        state.is_at_observe = True
+        
+        if state.mode == active_mode:
+            state.mode = restore_mode
 
 # ================= 辅助函数 =================
 def get_first_empty_slot():
@@ -147,27 +137,19 @@ def main():
     vision = VisionSystem()
     ai = AIDecisionMaker()
     
-    print(log_msg("INFO", "System", "Connecting to PLC (Ethernet)..."))
+    print(log_msg("INFO", "System", "Connecting to PLC (Ethernet) for Inventory Only..."))
     plc = PLCClient(ip='192.168.0.10')
     
-    if settings.SIMULATION_MODE:
-        cap = MockCamera()
-    else:
-        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    # 🔥 彻底移除 MockCamera，强制使用真实的物理摄像头
+    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
-    # 🔥 启动时的安全逻辑:
-    # 只有当启动信号存在时，才允许初始归位
+    # 纯净启动逻辑: 直接让机械臂归位并就绪
     if arm.mc:
-        if arm.is_start_signal_active():
-            print(log_msg("INFO", "System", "Start Signal OK. Initial Homing..."))
-            arm.go_observe()
-            state.is_at_observe = True
-        else:
-            print(log_msg("WARN", "System", "⚠️ No Start Signal on Boot. Waiting..."))
-            state.mode = "EMERGENCY_STOP" # 初始锁死
-            state.system_msg = "WAITING FOR START SIGNAL"
+        print(log_msg("INFO", "System", "Initial Homing..."))
+        arm.go_observe()
+        state.is_at_observe = True
 
     web_thread = threading.Thread(target=web_server.start_flask, args=(state, ai), daemon=True)
     web_thread.start()
@@ -179,56 +161,25 @@ def main():
     try:
         while True:
             # ==========================================
-            # 🔥 SECTION 0: 硬件安全与信号监控 (最高优先级)
+            # 保留的 PLC 交互：单纯读取物理库存
             # ==========================================
-            
-            # 1. 检测启动信号 (G36)
-            # 假设: 1=正常, 0=急停
-            is_start_ok = arm.is_start_signal_active()
-
-            # [情况 A]: 运行中信号丢失 -> 急停
-            if not is_start_ok:
-                if state.mode != "EMERGENCY_STOP":
-                    print(log_msg("ERROR", "System", "🛑 START SIGNAL LOST! EMERGENCY STOP!"))
-                    arm.emergency_stop()      # 硬件急停
-                    state.mode = "EMERGENCY_STOP"
-                    state.is_at_observe = False
-                    state.system_msg = "🛑 HALTED: Check Start Signal"
-                
-                # 信号丢失期间，检查复位也没用(通常逻辑)，必须等启动信号回来
-                time.sleep(0.1)
-                continue # 跳过后面所有逻辑，死循环等待
-
-            # [情况 B]: 信号已恢复，但系统仍在急停状态 -> 等待复位信号
-            if is_start_ok and state.mode == "EMERGENCY_STOP":
-                state.system_msg = "⚠️ Signal OK. Press RESET to resume."
-                
-                # 检测复位信号 (G35)
-                if arm.is_reset_signal_active():
-                    print(log_msg("INFO", "System", "🔄 Reset Signal Detected. Homing..."))
-                    arm.go_observe() # 复位动作：归位
-                    state.is_at_observe = True
-                    state.mode = "IDLE"
-                    state.system_msg = "System Resumed (IDLE)"
-                    print(log_msg("INFO", "System", "System Resumed."))
-                    time.sleep(1.0) # 防止长按复位键重复触发
-                else:
-                    time.sleep(0.1)
-                    continue # 等待复位
-
-            # ==========================================
-            # 🔥 SECTION 1: 正常业务逻辑
-            # ==========================================
+            real_inventory = plc.get_slots_status()
+            if real_inventory: 
+                state.inventory = real_inventory
 
             # --- 心跳检测 ---
-            if state.mode != "IDLE" and state.mode != "EMERGENCY_STOP" and (time.time() - state.last_heartbeat > 5.0):
+            if state.mode != "IDLE" and (time.time() - state.last_heartbeat > 5.0):
                 print(log_msg("WARN", "System", "Heartbeat lost. Forcing IDLE mode."))
                 state.mode = "IDLE"
-
-            # --- 同步 PLC 库存 ---
-            real_inventory = plc.get_slots_status()
-            if real_inventory: state.inventory = real_inventory
             
+            # --- 🔥 新增：满载全局守护监控 (Watchdog) ---
+            # 只要是 AUTO 模式下，实时检查 1~6 号槽位是否全不为 0 (即全满)
+            if state.mode == "AUTO":
+                if all(state.inventory.get(i, 0) != 0 for i in range(1, 7)):
+                    print(log_msg("WARN", "System", "Warehouse is FULL! Auto-switching to IDLE mode."))
+                    state.mode = "IDLE"
+                    state.system_msg = "Warehouse Full. Auto Stopped."
+
             # --- 视觉处理 ---
             ret, frame = cap.read()
             if not ret: time.sleep(0.1); continue
@@ -238,24 +189,13 @@ def main():
             # --- AI 指令 ---
             if state.pending_ai_cmd:
                 cmd_list = state.pending_ai_cmd
-                state.pending_ai_cmd = None # 取出后清空
+                state.pending_ai_cmd = None 
                 
                 for cmd in cmd_list:
-                    # 只有在非急停状态下才处理指令
-                    if state.mode == "EMERGENCY_STOP": break 
-                    
                     cmd_action = cmd.get('action')
                     cmd_type = cmd.get('type')
-                    
-                    if cmd_type == 'inventory_update':
-                        sid = cmd.get('slot_id')
-                        sts = cmd.get('status')
-                        if sid == 0:
-                            for i in range(1, 7): state.inventory[i] = sts
-                        elif sid in state.inventory:
-                            state.inventory[sid] = sts
-                    
-                    elif cmd_type == 'sort':
+
+                    if cmd_type == 'sort':
                         target_slot = cmd.get('slot_id')
                         target_color = cmd.get('color', 'any').lower()
                         if target_slot and state.inventory.get(target_slot) == 0:
@@ -265,16 +205,18 @@ def main():
                             state.system_msg = f"Slot {target_slot} Full."
 
                     elif cmd_action == 'start':
-                        if state.mode == "IDLE":
+                        # 点击开始前，如果已经满了就直接拒绝进入 AUTO，并给出提示
+                        if all(state.inventory.get(i, 0) != 0 for i in range(1, 7)):
+                            state.system_msg = "Cannot start: Warehouse Full."
+                            print(log_msg("WARN", "System", "Start rejected: Warehouse is completely full."))
+                        elif state.mode == "IDLE":
                             if not state.is_at_observe: arm.go_observe(); state.is_at_observe = True
                             state.mode = "AUTO"
                             state.system_msg = "Auto Mode ON"
                     elif cmd_action == 'stop':
                         state.mode = "IDLE"; state.system_msg = "Stopped."
-                    elif cmd_action == 'reset': # 软件复位
+                    elif cmd_action == 'reset': 
                         arm.go_observe(); state.is_at_observe = True; state.system_msg = "Reset Done."
-                    elif cmd_action == 'clear_all':
-                        state.inventory = {i: 0 for i in range(1, 7)}
 
             # --- 自动化触发逻辑 ---
             trigger_detected = False
@@ -293,6 +235,7 @@ def main():
                     t.start()
                     time.sleep(0.5)
                 else:
+                    # 这个兜底其实很难触发了，因为上面满载监控会提前拦截，保留作双重保险
                     state.mode = "IDLE"; state.system_msg = "Warehouse Full"
 
             elif state.mode == "SORTING_TASK" and trigger_detected:
@@ -308,7 +251,6 @@ def main():
                     t.start()
                     state.current_task = None
                 else:
-                    # 缓冲逻辑
                     buffer_slot = get_buffer_slot(reserved_slot=target_slot)
                     if buffer_slot:
                         state.is_at_observe = False

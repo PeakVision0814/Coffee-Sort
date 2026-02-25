@@ -13,8 +13,6 @@ import os
 import re
 from openai import OpenAI
 
-SIMULATION_MODE = False 
-
 class AIDecisionMaker:
     def __init__(self):
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
