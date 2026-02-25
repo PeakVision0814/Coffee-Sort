@@ -18,8 +18,6 @@ class VisionSystem:
         # 1. 路径处理
         self.base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         self.config_dir = os.path.join(self.base_dir, config_dir)
-        
-        # 🔥 彻底移除相机内参读取逻辑 (不再需要空间测距和去畸变)
 
         # 2. 加载 ROI 配置文件 (这个依然需要，因为要划定检测区域)
         vision_config_path = os.path.join(self.config_dir, "vision_config.json")
