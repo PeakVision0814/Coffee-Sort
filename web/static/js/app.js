@@ -108,9 +108,12 @@ function updateUIState(mode) {
     chatBtn.disabled = false;
 
     if (isSystemBusy()) {
-        btnMain.className = "btn btn-danger btn-lg w-100 mb-3 py-3 fw-bold shadow-lg";
-        btnMain.innerHTML = '<i class="fas fa-stop-circle me-2 animate-pulse"></i> 停止运行 (STOP)';
-        statusText.innerHTML = '<span class="text-danger"><i class="fas fa-cog fa-spin me-1"></i> SYSTEM BUSY</span>';
+        // 🔥 修改点 1：使用小巧的 btn-sm 和红色样式
+        btnMain.className = "btn btn-danger btn-sm fw-bold px-3 shadow-sm";
+        btnMain.innerHTML = '<i class="fas fa-stop-circle me-1 animate-pulse"></i> 停止运行';
+        
+        // 🔥 修改点 2：精简状态文字，适应头部狭小空间
+        statusText.innerHTML = '<span class="text-danger"><i class="fas fa-cog fa-spin me-1"></i> BUSY</span>';
         
         aiBadge.className = "badge bg-secondary border border-secondary text-light opacity-50";
         aiBadge.innerHTML = '<i class="fas fa-lock me-1"></i>AI LOCKED';
@@ -119,9 +122,12 @@ function updateUIState(mode) {
         chatBtn.className = "btn btn-danger fw-bold";
         chatBtn.innerHTML = '<i class="fas fa-hand-paper me-1"></i> 中断';
     } else {
-        btnMain.className = "btn btn-success btn-lg w-100 mb-3 py-3 fw-bold shadow-lg";
-        btnMain.innerHTML = '<i class="fas fa-rocket me-2"></i> 启动自动分拣 (AUTO)';
-        statusText.innerHTML = '<span class="text-success"><i class="fas fa-check-circle me-1"></i> SYSTEM READY</span>';
+        // 🔥 修改点 3：使用小巧的 btn-sm 和绿色样式
+        btnMain.className = "btn btn-success btn-sm fw-bold px-3 shadow-sm";
+        btnMain.innerHTML = '<i class="fas fa-power-off me-1"></i> 启动自动分拣';
+        
+        // 🔥 修改点 4：精简状态文字
+        statusText.innerHTML = '<span class="text-success"><i class="fas fa-check-circle me-1"></i> READY</span>';
         
         aiBadge.className = "badge bg-success bg-opacity-25 text-success border border-success";
         aiBadge.innerHTML = '<i class="fas fa-brain me-1"></i>AI ACTIVE';
