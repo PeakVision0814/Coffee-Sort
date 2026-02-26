@@ -42,6 +42,39 @@ class PLCClient:
             print(f"❌ [PLC] 连接异常: {e}")
             self.connected = False
 
+    def send_iot_start(self):
+        """
+        触发 PLC 推出盒子 (地址 DB1.DBX4.4)
+        逻辑: 写 True -> 保持 0.5 秒 -> 写 False (模拟按键脉冲)
+        """
+        if not hasattr(self, 'client') or not self.client.get_connected():
+            print("[PLC] ⚠️ 未连接到 PLC，无法发送 IOTstart 信号")
+            return False
+            
+        try:
+            # 读取 DB1 的第 4 个字节 (长度为 1)
+            data = self.client.db_read(1, 4, 1)
+            
+            # 将第 4 位的状态改为 True (1)
+            import snap7.util
+            snap7.util.set_bool(data, 0, 4, True)
+            self.client.db_write(1, 4, data)
+            print("[PLC] 🟢 已向 DB1.DBX4.4 发送 IOTstart 启动信号！")
+            
+            # 保持 0.5 秒让 PLC 稳定读取
+            import time
+            time.sleep(0.5)
+            
+            # 恢复为 False (0)，防止 PLC 一直往外推盒子
+            snap7.util.set_bool(data, 0, 4, False)
+            self.client.db_write(1, 4, data)
+            
+            return True
+            
+        except Exception as e:
+            print(f"[PLC] ❌ 发送 IOTstart 异常: {e}")
+            return False
+    
     def get_slots_status(self):
         """
         读取 6 个槽位的状态

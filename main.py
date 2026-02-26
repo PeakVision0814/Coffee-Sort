@@ -63,6 +63,8 @@ class SystemState:
         self.system_msg = None
         self.current_task = None
         self.is_at_observe = False 
+        self.g35_high_start_time = 0.0
+        self.g35_valid = False
 
 state = SystemState()
 
@@ -195,38 +197,73 @@ def main():
                     cmd_action = cmd.get('action')
                     cmd_type = cmd.get('type')
 
+                    # 场景 1：AI 触发了“精准分拣单次任务”
                     if cmd_type == 'sort':
                         target_slot = cmd.get('slot_id')
                         target_color = cmd.get('color', 'any').lower()
                         if target_slot and state.inventory.get(target_slot) == 0:
                             state.current_task = {'slot': target_slot, 'color': target_color}
                             state.mode = "SORTING_TASK"
+                            print(log_msg("INFO", "AI", f"任务已下达，准备分拣 {target_color} 到槽位 {target_slot}。"))
+                            
+                            # 🔥 呼叫 PLC：把盒子推出来吧！
+                            plc.send_iot_start()
                         else:
                             state.system_msg = f"Slot {target_slot} Full."
 
+                    # 场景 2：AI 触发了“全局启动自动流水线”
                     elif cmd_action == 'start':
-                        # 点击开始前，如果已经满了就直接拒绝进入 AUTO，并给出提示
+                        # 如果仓库满了，直接拒绝启动
                         if all(state.inventory.get(i, 0) != 0 for i in range(1, 7)):
                             state.system_msg = "Cannot start: Warehouse Full."
                             print(log_msg("WARN", "System", "Start rejected: Warehouse is completely full."))
                         elif state.mode == "IDLE":
-                            if not state.is_at_observe: arm.go_observe(); state.is_at_observe = True
+                            if not state.is_at_observe: 
+                                arm.go_observe()
+                                state.is_at_observe = True
                             state.mode = "AUTO"
                             state.system_msg = "Auto Mode ON"
+                            print(log_msg("INFO", "AI", "收到启动指令，进入全自动流水线模式。"))
+                            
+                            # 🔥 呼叫 PLC：流水线开启，把盒子推出来吧！
+                            plc.send_iot_start()
+                            
                     elif cmd_action == 'stop':
-                        state.mode = "IDLE"; state.system_msg = "Stopped."
+                        state.mode = "IDLE"
+                        state.system_msg = "Stopped."
                     elif cmd_action == 'reset': 
-                        arm.go_observe(); state.is_at_observe = True; state.system_msg = "Reset Done."
+                        arm.go_observe()
+                        state.is_at_observe = True
+                        state.system_msg = "Reset Done."
 
             # --- 自动化触发逻辑 ---
             trigger_detected = False
             detected_color = "unknown"
 
+            # 1. 视觉条件：在观测点 且 看到物品
             if state.is_at_observe and vision_data and vision_data.get("detected"):
                 trigger_detected = True
                 detected_color = vision_data.get("color", "unknown").lower()
             
-            if state.mode == "AUTO" and trigger_detected:
+            # 2. 硬件条件：实时读取底座 G35 引脚并进行【软件消抖】
+            raw_g35 = arm.is_reset_signal_active()
+            
+            if raw_g35:
+                # 如果是第一次检测到高电平，记录当前时间
+                if state.g35_high_start_time == 0.0:
+                    state.g35_high_start_time = time.time()
+                # 如果持续高电平超过了 0.5 秒（500毫秒），则认定信号有效
+                elif time.time() - state.g35_high_start_time >= 0.5:
+                    state.g35_valid = True
+            else:
+                # 只要一断开（哪怕是 1 毫秒的低电平毛刺），立刻清零，绝不误触发！
+                state.g35_high_start_time = 0.0
+                state.g35_valid = False
+                
+            g35_go_signal = state.g35_valid
+
+            # 🔥 必须同时满足：系统模式正确 + 视觉触发 + 收到 PLC 的 G35 放行信号
+            if state.mode == "AUTO" and trigger_detected and g35_go_signal:
                 target = get_first_empty_slot()
                 if target:
                     state.is_at_observe = False 
@@ -235,10 +272,10 @@ def main():
                     t.start()
                     time.sleep(0.5)
                 else:
-                    # 这个兜底其实很难触发了，因为上面满载监控会提前拦截，保留作双重保险
                     state.mode = "IDLE"; state.system_msg = "Warehouse Full"
 
-            elif state.mode == "SORTING_TASK" and trigger_detected:
+            # 🔥 SORTING_TASK 模式同样增加 g35_go_signal 拦截
+            elif state.mode == "SORTING_TASK" and trigger_detected and g35_go_signal:
                 task = state.current_task
                 target_slot = task['slot']
                 target_color = task['color']
