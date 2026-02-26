@@ -302,6 +302,12 @@ def main():
                         state.mode = "IDLE"
                         state.system_msg = "Stopped."
 
+                    elif cmd_action == 'sleep': 
+                        state.mode = "IDLE"
+                        state.system_msg = "Going to Sleep..."
+                        arm.sleep_and_power_off()
+                        state.system_msg = "Power Off Safe."
+
             # --- 自动化触发逻辑 ---
             trigger_detected = False
             detected_color = "unknown"

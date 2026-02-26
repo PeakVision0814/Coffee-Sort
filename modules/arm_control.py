@@ -87,17 +87,20 @@ class ArmController:
             time.sleep(0.05) # 每次只睡 0.05 秒，然后起来检查
 
     # ================= 🌟 工业级闭环控制核心 =================
-    def wait_for_arrival(self, target_angles, tolerance=2.5, timeout=5.0):
+    def wait_for_arrival(self, target_angles, tolerance=4.5, timeout=5.0):
         if not self.is_connected: return False
 
-        # 🔥 使用 safe_sleep 替代 time.sleep，即使在这 0.5 秒里也能急停
+        # 发指令后等待电机启动
         self.safe_sleep(0.5)
 
         start_time = time.time()
         last_valid_angles = None
         
+        # 🔥 新增：用于记录上一帧角度，判断机械臂是否已经“物理静止”
+        prev_angles = None
+        stable_count = 0
+
         while time.time() - start_time < timeout:
-            # 🔥 核心修改：在死等走位的循环中，随时检查 G35
             if not self.check_g35_safe():
                 self.emergency_stop()
                 raise RuntimeError("EMERGENCY_STOP")
@@ -108,23 +111,75 @@ class ArmController:
                 last_valid_angles = current_angles
                 diffs = [abs(c - t) for c, t in zip(current_angles, target_angles)]
                 max_error = max(diffs)
+                
+                # 方案 A：理论精度达标，完美到达
                 if max_error <= tolerance:
                     return True
+                
+                # 方案 B：物理静止判定（防止受重力/负载影响永远达不到理论值而死等）
+                if prev_angles:
+                    # 计算最近 0.1 秒内，6个关节最大移动了多少度
+                    move_diff = max([abs(c - p) for c, p in zip(current_angles, prev_angles)])
+                    
+                    if move_diff < 0.5:  # 0.1秒内动了不到0.5度，说明基本停住了
+                        stable_count += 1
+                    else:
+                        stable_count = 0  # 如果还在动，清零重新计
+                    
+                    # 🔥 核心：如果连续3次(约0.3秒)几乎不动，且误差不是特别离谱(比如放宽到 8.5度内)，果断放行！
+                    if stable_count >= 3 and max_error <= 8.5:
+                        # print(f"💡 [Arm] 智能放行：虽有 {round(max_error, 1)}° 稳态误差，但已物理停稳，提前结束死等。")
+                        return True
+
+                prev_angles = current_angles
             
             time.sleep(0.1)
             
         if last_valid_angles:
             diffs = [round(abs(c - t), 1) for c, t in zip(last_valid_angles, target_angles)]
-            print(f"⚠️ [Arm] 到达检测超时。最大误差: {max(diffs)}度。允许误差: {tolerance}度。")
+            print(f"⚠️ [Arm] 到达检测超时。最大误差: {max(diffs)}度。理论允许误差: {tolerance}度。")
         else:
             print("⚠️ [Arm] 到达检测超时：未读取到有效角度数据，串口可能繁忙。")
             
         return False
 
+    def sleep_and_power_off(self):
+        """安全休眠并断电：先复位到最高点，再降至最低重心后释放电机"""
+        if not self.is_connected: return
+        
+        print("[Arm] 收到休眠断电指令，正在执行安全归位...")
+        # 1. 🔥 先调用我们写好的智能复位，回到最高安全观测点，防止中途平移撞物
+        self.go_observe()
+        time.sleep(0.5)
+        
+        # 2. 获取休眠角度
+        safe_angles = settings.PICK_POSES.get("sleep")
+        if not safe_angles:
+            print("[Arm] ⚠️ 未在 settings.py 中配置 sleep 点位，放弃休眠。")
+            return
+            
+        print("[Arm] 正在缓慢降落至安全休眠点...")
+        # 3. 缓慢、安全地向下折叠到休眠点 (把速度降到 30，追求极致平稳)
+        self.move_to_angles_smart(safe_angles, 30, timeout=10.0)
+        
+        # 4. 停稳后，彻底切断主板对电机的供电
+        print("[Arm] 已安全趴下，正在切断电机电源...")
+        time.sleep(1.0) # 缓冲1秒，确保动能完全释放
+        self.mc.power_off()
+        
+        # 5. 标记为未连接，防止后续错误发指令
+        self.is_connected = False 
+        print("[Arm] 💤 晚安！电机已释放，您可以安全关闭总电源了。")
+
     def move_to_angles_smart(self, angles, speed, timeout):
+        """发送角度并智能等待到达 (带有动态公差)"""
         if self.is_connected:
             self.mc.send_angles(angles, speed)
-            self.wait_for_arrival(angles, tolerance=4.5, timeout=timeout)
+            
+            # 🔥 动态公差：飞越途经点(速度快)要求低，抓取放置点(速度慢)要求高
+            tol = 6.0 if speed == self.fly_speed else 4.0
+            
+            self.wait_for_arrival(angles, tolerance=tol, timeout=timeout)
 
     def go_observe(self):
         """回到抓取最高观测点 (带有极其聪明的智能防撞与防绕路逻辑)"""

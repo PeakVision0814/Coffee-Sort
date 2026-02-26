@@ -204,6 +204,7 @@ def command():
     if action == 'start': cmd_list = [{"type": "sys", "action": "start"}]
     elif action == 'stop': cmd_list = [{"type": "sys", "action": "stop"}]
     elif action == 'scan': cmd_list = [{"type": "sys", "action": "scan"}]
+    elif action == 'sleep': cmd_list = [{"type": "sys", "action": "sleep"}]
     
     system_state.pending_ai_cmd = cmd_list
     
