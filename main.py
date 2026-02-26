@@ -65,6 +65,8 @@ class SystemState:
         self.is_at_observe = False 
         self.g35_high_start_time = 0.0
         self.g35_valid = False
+        self.g36_high_start_time = 0.0
+        self.g36_valid = False
 
 state = SystemState()
 
@@ -78,45 +80,64 @@ def get_standard_success_msg(slot_id):
 
 # ================= 核心工作线程 =================
 def perform_pick_and_place(arm, target_slot, active_mode="SINGLE_TASK", restore_mode="IDLE"):
-    """纯净版搬运流程：加入 PLC 业务握手"""
+    """纯净版搬运流程：加入 PLC 业务握手与【动态硬件急停】机制"""
+    emergency_stopped = False
     try:
         state.is_at_observe = False
         state.mode = active_mode
         
-        # --- 1. 抓取 ---
+        # 🔥 1. 开始高危动作，开启 G35 急停监控！
+        arm.monitor_g35_estop = True
+        
+        # --- 2. 抓取 ---
         arm.pick()
         
         if state.mode == "IDLE" and restore_mode != "IDLE":
             print(log_msg("WARN", "System", "Interrupt detected."))
             restore_mode = "IDLE"
 
-        # --- 2. 放置 ---
+        # --- 3. 放置 ---
         arm.place(target_slot)
         
-        # --- 3. 🔥 动作完美完成，向 PLC 发送 G5 完成信号 ---
+        # 🔥 4. 东西已经稳稳放下！任务完成！
+        # 此时必须立刻关闭监控，因为一旦发送 G5，PLC 马上就会合法地撤销 G35！
+        arm.monitor_g35_estop = False
+        
+        # --- 5. 向 PLC 发送 G5 完成信号 ---
         print(log_msg("INFO", "System", "Sending Task Complete Signal (G5) to PLC..."))
         arm.set_plc_signal(True)
-        time.sleep(0.5)  # 保持高电平 0.5 秒，确保 PLC 的扫描周期能稳定捕捉到这个脉冲
+        time.sleep(0.5)
         arm.set_plc_signal(False)
         
-        # --- 4. 更新系统状态 ---
+        # --- 6. 更新系统状态 ---
         state.inventory[target_slot] = 1
         state.system_msg = get_standard_success_msg(target_slot)
         print(log_msg("INFO", "System", f"Slot {target_slot} mission complete."))
 
     except Exception as e:
-        # 如果上方任何一步（视觉、控制、通信）报错，绝对不会走到发信号这一步
-        state.system_msg = f"❌ Error: {e}"
-        print(log_msg("ERROR", "System", f"Process Stopped: {e}"))
-        try: arm.go_observe()
-        except: pass
+        if "EMERGENCY_STOP" in str(e):
+            emergency_stopped = True
+            state.system_msg = "🚨 E-STOP: G35 Signal Lost!"
+            print(log_msg("ERROR", "System", "🚨 触发物理急停：PLC 撤销了 G35 许可，机械臂已在当前位置紧急锁死！"))
+        else:
+            state.system_msg = f"❌ Error: {e}"
+            print(log_msg("ERROR", "System", f"Process Stopped: {e}"))
+            
         restore_mode = "IDLE" 
     
     finally:
-        print(log_msg("INFO", "System", "Returning to Observe Point..."))
-        arm.go_observe() 
-        state.is_at_observe = True
+        # 🔥 保底措施：无论如何，确保退出线程时监控是关闭的
+        arm.monitor_g35_estop = False 
         
+        if not emergency_stopped:
+            print(log_msg("INFO", "System", "Returning to Observe Point..."))
+            try: arm.go_observe() 
+            except: pass
+            state.is_at_observe = True
+        else:
+            print(log_msg("WARN", "System", "⚠️ 机台处于急停状态，已放弃归位，等待人工介入处理。"))
+            state.is_at_observe = False 
+            
         if state.mode == active_mode:
             state.mode = restore_mode
 
@@ -162,7 +183,53 @@ def main():
 
     try:
         while True:
+            # --- 硬件物理复位逻辑 (G36) ---
             # ==========================================
+            raw_g36 = arm.is_reset_signal_active()
+            
+            # 1. 对 G36 进行连续高电平计时
+            if raw_g36:
+                if state.g36_high_start_time == 0.0:
+                    state.g36_high_start_time = time.time()
+                # 只要连续高电平超过 0.5 秒 (PLC给的是1秒脉冲)，就确认为真实触发！
+                elif time.time() - state.g36_high_start_time >= 0.5:
+                    state.g36_valid = True
+            else:
+                # 只要断开一瞬间，立刻清零计时器，无情过滤静电毛刺
+                state.g36_high_start_time = 0.0
+                state.g36_valid = False
+
+            # 2. 如果信号消抖通过，执行复位动作
+            if state.g36_valid:
+                # 绝对禁止在机械臂正在搬运时强行复位
+                if state.mode not in ["EXECUTING", "SINGLE_TASK"]:
+                    print(log_msg("INFO", "System", "🔴 检测到稳定的 G36 物理复位信号 (已过滤毛刺)，正在执行安全归位..."))
+                    
+                    try:
+                        arm.go_observe()
+                    except Exception as e:
+                        print(log_msg("ERROR", "System", f"复位动作执行异常: {e}"))
+                    
+                    # 彻底清理系统状态
+                    state.is_at_observe = True
+                    state.mode = "IDLE"
+                    state.system_msg = "Hardware Reset Done."
+                    
+                    # 强制清空所有针脚状态，防止重复触发或串线
+                    state.g35_high_start_time = 0.0
+                    state.g35_valid = False
+                    state.g36_high_start_time = 0.0
+                    state.g36_valid = False
+                    
+                    # 🔥 休眠 1.2 秒，完美熬过 PLC 剩下的高电平脉冲时间
+                    time.sleep(1.2)
+                else:
+                    print(log_msg("WARN", "System", "⚠️ 系统正在运行中，已安全忽略 G36 复位信号。"))
+                    state.g36_high_start_time = 0.0
+                    state.g36_valid = False
+                    time.sleep(1.2)
+        
+
             # 保留的 PLC 交互：单纯读取物理库存
             # ==========================================
             real_inventory = plc.get_slots_status()
@@ -246,7 +313,7 @@ def main():
                 detected_color = vision_data.get("color", "unknown").lower()
             
             # 2. 硬件条件：实时读取底座 G35 引脚并进行【软件消抖】
-            raw_g35 = arm.is_reset_signal_active()
+            raw_g35 = arm.is_start_signal_active()
             
             if raw_g35:
                 # 如果是第一次检测到高电平，记录当前时间
