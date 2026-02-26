@@ -124,7 +124,7 @@ class ArmController:
     def move_to_angles_smart(self, angles, speed, timeout):
         if self.is_connected:
             self.mc.send_angles(angles, speed)
-            self.wait_for_arrival(angles, tolerance=4.2, timeout=timeout)
+            self.wait_for_arrival(angles, tolerance=4.5, timeout=timeout)
 
     def go_observe(self):
         """回到抓取最高观测点 (带有极其聪明的智能防撞与防绕路逻辑)"""

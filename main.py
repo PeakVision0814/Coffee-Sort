@@ -201,8 +201,10 @@ def main():
 
             # 2. 如果信号消抖通过，执行复位动作
             if state.g36_valid:
-                # 绝对禁止在机械臂正在搬运时强行复位
-                if state.mode not in ["EXECUTING", "SINGLE_TASK"]:
+                # 🔥 核心修改：极其严格的权限控制！
+                # 只有系统处于纯粹的 IDLE 待机状态（比如开机时、急停报错后、人为点Stop后），才允许复位！
+                # 如果系统在 AUTO 模式（正在等下一个盒子），绝对忽略复位信号，防止流水线被意外掐断！
+                if state.mode == "IDLE":
                     print(log_msg("INFO", "System", "🔴 检测到稳定的 G36 物理复位信号 (已过滤毛刺)，正在执行安全归位..."))
                     
                     try:
@@ -215,16 +217,17 @@ def main():
                     state.mode = "IDLE"
                     state.system_msg = "Hardware Reset Done."
                     
-                    # 强制清空所有针脚状态，防止重复触发或串线
+                    # 强制清空所有针脚状态
                     state.g35_high_start_time = 0.0
                     state.g35_valid = False
                     state.g36_high_start_time = 0.0
                     state.g36_valid = False
                     
-                    # 🔥 休眠 1.2 秒，完美熬过 PLC 剩下的高电平脉冲时间
                     time.sleep(1.2)
                 else:
-                    print(log_msg("WARN", "System", "⚠️ 系统正在运行中，已安全忽略 G36 复位信号。"))
+                    # 如果不是 IDLE 模式（比如在 AUTO 模式或者正在搬运），直接吞掉这个信号！
+                    # 我们把打印级别改成 DEBUG 甚至可以注释掉，免得烦人
+                    # print(log_msg("WARN", "System", f"⚠️ 系统当前处于 {state.mode} 模式，已安全忽略 G36 幽灵信号。"))
                     state.g36_high_start_time = 0.0
                     state.g36_valid = False
                     time.sleep(1.2)
@@ -298,10 +301,6 @@ def main():
                     elif cmd_action == 'stop':
                         state.mode = "IDLE"
                         state.system_msg = "Stopped."
-                    elif cmd_action == 'reset': 
-                        arm.go_observe()
-                        state.is_at_observe = True
-                        state.system_msg = "Reset Done."
 
             # --- 自动化触发逻辑 ---
             trigger_detected = False
@@ -320,7 +319,7 @@ def main():
                 if state.g35_high_start_time == 0.0:
                     state.g35_high_start_time = time.time()
                 # 如果持续高电平超过了 0.5 秒（500毫秒），则认定信号有效
-                elif time.time() - state.g35_high_start_time >= 0.5:
+                elif time.time() - state.g35_high_start_time >= 0.9:
                     state.g35_valid = True
             else:
                 # 只要一断开（哪怕是 1 毫秒的低电平毛刺），立刻清零，绝不误触发！
