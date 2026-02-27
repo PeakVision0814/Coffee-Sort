@@ -49,7 +49,6 @@ class VisionSystem:
         """
         处理流程：绘制ROI -> 裁切 -> 颜色分析
         """
-        # 🔥 彻底移除了去畸变 (cv2.undistort) 步骤，极大节省了系统算力！
 
         # 初始化结果容器
         result = {
