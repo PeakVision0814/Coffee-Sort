@@ -38,9 +38,12 @@ class ArmController:
             self.mc = MyCobot280(settings.PORT, settings.BAUD)
             time.sleep(0.5)
             if not self.mc.is_power_on(): self.mc.power_on()
+            
+            # 🔥 必须先告诉系统“已连接”，否则下面的气爪和信号初始化全被拦截！
+            self.is_connected = True 
+            
             self.gripper_open()
-            self.set_plc_signal(False)
-            self.is_connected = True
+            self.set_plc_signal(False) # 现在这句终于能生效了，开机强制拉低 G5
             print(f"✅ [Arm] 已成功连接真实机械臂于 {settings.PORT}")
         except Exception as e:
             print(f"❌ [Arm] 连接真实机械臂失败: {e}")

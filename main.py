@@ -246,11 +246,22 @@ def main():
             
             # --- 🔥 新增：满载全局守护监控 (Watchdog) ---
             # 只要是 AUTO 模式下，实时检查 1~6 号槽位是否全不为 0 (即全满)
-            if state.mode == "AUTO":
-                if all(state.inventory.get(i, 0) != 0 for i in range(1, 7)):
-                    print(log_msg("WARN", "System", "Warehouse is FULL! Auto-switching to IDLE mode."))
-                    state.mode = "IDLE"
-                    state.system_msg = "Warehouse Full. Auto Stopped."
+            # 🔥 必须同时满足：系统模式正确 + 视觉触发 + 收到 PLC 的 G35 放行信号
+            if state.mode == "AUTO" and trigger_detected and g35_go_signal:
+                target = get_first_empty_slot()
+                if target:
+                    state.is_at_observe = False 
+                    state.mode = "EXECUTING" 
+                    
+                    # 🔥 [关键修复] 吞掉当前 G35 触发信号，强制要求下一次必须重新拉高，防止死循环无限发 G5
+                    state.g35_valid = False
+                    state.g35_high_start_time = 0.0
+
+                    t = threading.Thread(target=perform_pick_and_place, args=(arm, target, "EXECUTING", "AUTO"))
+                    t.start()
+                    time.sleep(0.5)
+                else:
+                    state.mode = "IDLE"; state.system_msg = "Warehouse Full"
 
             # --- 视觉处理 ---
             ret, frame = cap.read()
@@ -334,6 +345,13 @@ def main():
                 
             g35_go_signal = state.g35_valid
 
+            # # 只要系统在 AUTO 模式，且 (视觉看到了东西 OR 物理针脚读到了电压)，就打印这四项核心指标
+            # if state.mode == "AUTO":
+            #     vision_ok = vision_data and vision_data.get("detected")
+            #     if vision_ok or raw_g35:
+            #         print(log_msg("DEBUG", "Trigger", 
+            #               f"状态核对 -> 在原点:{state.is_at_observe} | 视觉识别:{vision_ok} | G35原始电平:{raw_g35} | G35消抖后:{g35_go_signal}"))
+
             # 🔥 必须同时满足：系统模式正确 + 视觉触发 + 收到 PLC 的 G35 放行信号
             if state.mode == "AUTO" and trigger_detected and g35_go_signal:
                 target = get_first_empty_slot()
@@ -352,6 +370,10 @@ def main():
                 target_slot = task['slot']
                 target_color = task['color']
                 is_match = (target_color == 'any' or detected_color == target_color)
+                
+                # 🔥 [关键修复] 同样在这里吞掉信号
+                state.g35_valid = False
+                state.g35_high_start_time = 0.0
                 
                 if is_match:
                     state.is_at_observe = False
