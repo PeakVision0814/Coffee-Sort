@@ -191,8 +191,8 @@ def main():
             if raw_g36:
                 if state.g36_high_start_time == 0.0:
                     state.g36_high_start_time = time.time()
-                # 只要连续高电平超过 0.5 秒 (PLC给的是1秒脉冲)，就确认为真实触发！
-                elif time.time() - state.g36_high_start_time >= 0.5:
+                # 只要连续高电平超过 0.9 秒 (PLC给的是1秒脉冲)，就确认为真实触发！
+                elif time.time() - state.g36_high_start_time >= 0.9:
                     state.g36_valid = True
             else:
                 # 只要断开一瞬间，立刻清零计时器，无情过滤静电毛刺
